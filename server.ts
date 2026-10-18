@@ -290,9 +290,21 @@ async function generatePoemWithCascade(req: ComposeRequest): Promise<GeneratedPo
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const parsedPort = Number.parseInt(process.env.PORT || '', 10);
+  const PORT = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
 
   app.use(express.json({ limit: '4mb' }));
+
+  // Lightweight deployment check for Android clients and hosting platforms.
+  // Never expose the API key itself; only report whether it is configured.
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      service: 'Sukhan AI API',
+      aiConfigured: Boolean(getGenAIClient()),
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // ============================================================================
   // 1. PERSISTENT SERVER CHAT HISTORY API (User-isolated by ownerId)
