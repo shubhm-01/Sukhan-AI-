@@ -1,0 +1,12 @@
+node_modules
+dist
+android
+.git
+.github
+.aistudio
+.data
+.env
+.env.*
+!.env.example
+*.apk
+npm-debug.log*
