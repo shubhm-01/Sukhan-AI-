@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiUrl } from '../lib/api';
 import {
   Feather,
   Globe,
@@ -148,7 +149,7 @@ export const ComposerPanel: React.FC<ComposerPanelProps> = ({
   const handleSuggestRadif = async () => {
     setLoadingSuggestions(true);
     try {
-      const res = await fetch('/api/poetry/suggest-radif', {
+      const res = await fetch(apiUrl('/api/poetry/suggest-radif'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
