@@ -2,9 +2,6 @@ import { GoogleGenAI } from '@google/genai';
 import { buildContextualChatReply } from './poetryLogic.ts';
 import type { UserSettings, GroundingSource } from './poetryLogic.ts';
 
-const DEFAULT_REMOTE_BACKEND_URL =
-  'https://ais-pre-m7cowsebvej45ggftmn4g5-483207363695.asia-southeast1.run.app';
-
 /**
  * Detects whether the app is executing inside a packaged Capacitor Android APK
  * WebView (where origin is https://localhost or capacitor://localhost with no local Express server)
@@ -70,8 +67,9 @@ export function resolveApiUrl(
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
 
   if (isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
-    const base = trimmedBase || DEFAULT_REMOTE_BACKEND_URL;
-    return `${base}${cleanPath}`;
+    // Production APKs must be built with VITE_API_BASE_URL set to a live backend.
+    // Do not silently route requests to a stale/hard-coded Cloud Run URL.
+    return trimmedBase ? `${trimmedBase}${cleanPath}` : cleanPath;
   }
 
   return cleanPath;
