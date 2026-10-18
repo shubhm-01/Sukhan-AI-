@@ -18,6 +18,7 @@ import {
   segmentMessageContent,
   detectLanguageAndScript,
 } from '../utils/poetryLogic';
+import { resolveApiUrl } from '../utils/apiClient';
 
 interface ChatMessageBubbleProps {
   message: ChatMessageItem;
@@ -95,12 +96,13 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
     setIsReciting(true);
     try {
-      const res = await fetch('/api/poetry/recite', {
+      const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: cleanText }),
       });
-      if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
         const data = await res.json();
         if (data.audioBase64) {
           const audio = new Audio(

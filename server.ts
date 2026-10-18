@@ -294,6 +294,25 @@ async function startServer() {
 
   app.use(express.json({ limit: '4mb' }));
 
+  // Enable CORS so the Capacitor Android APK (https://localhost / capacitor://localhost)
+  // can communicate seamlessly with the hosted backend API endpoints.
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, OPTIONS'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization'
+    );
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   // ============================================================================
   // 1. PERSISTENT SERVER CHAT HISTORY API (User-isolated by ownerId)
   // ============================================================================
@@ -337,8 +356,15 @@ async function startServer() {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
 
+    const lastUserMsg =
+      [...rawMessages].reverse().find((m: any) => m.role === 'user')?.content || '';
+    const prevAssistantMsg =
+      [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
+    const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
+    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+
     const ai = getGenAIClient();
-    const systemInstruction = buildChatSystemInstruction(settings);
+    const systemInstruction = buildChatSystemInstruction(settings, userIntent);
     const formattedContents = formatMultiTurnContents(
       rawMessages.slice(-16).map((m: any) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -369,7 +395,10 @@ async function startServer() {
 
           const text = response.text?.trim();
           if (text) {
-            finalReplyText = text;
+            finalReplyText =
+              userIntent === 'greeting'
+                ? text.replace(/\[\/?VERSE\]/gi, '')
+                : text;
             providerUsed = modelId;
             const chunks =
               response.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -428,8 +457,15 @@ async function startServer() {
       return;
     }
 
+    const lastUserMsg =
+      [...rawMessages].reverse().find((m: any) => m.role === 'user')?.content || '';
+    const prevAssistantMsg =
+      [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
+    const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
+    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+
     const ai = getGenAIClient();
-    const systemInstruction = buildChatSystemInstruction(settings);
+    const systemInstruction = buildChatSystemInstruction(settings, userIntent);
     const formattedContents = formatMultiTurnContents(
       rawMessages.slice(-16).map((m: any) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',

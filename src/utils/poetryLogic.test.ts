@@ -12,6 +12,10 @@ import {
   detectUserIntent,
   buildContextualChatReply,
 } from './poetryLogic.ts';
+import {
+  isNativeApkEnvironment,
+  resolveApiUrl,
+} from './apiClient.ts';
 
 test('detectLanguageAndScript identifies Urdu script (RTL)', () => {
   const res = detectLanguageAndScript('محبت کی شام اور تنہائی');
@@ -149,3 +153,31 @@ test('buildContextualChatReply handles contextual follow-ups like make it sadder
   assert.ok(reply.includes('[VERSE]'));
   assert.ok(reply.toLowerCase().includes('hijr') || reply.toLowerCase().includes('melancholic'));
 });
+
+test('isNativeApkEnvironment and resolveApiUrl handle Web vs Capacitor Android APK origins accurately', () => {
+  // Standard Web dev server (localhost:3000) -> relative path
+  assert.equal(
+    isNativeApkEnvironment({ protocol: 'http:', hostname: 'localhost', port: '3000' }, false),
+    false
+  );
+  assert.equal(
+    resolveApiUrl('/api/chat/stream', '', { protocol: 'http:', hostname: 'localhost', port: '3000' }, false),
+    '/api/chat/stream'
+  );
+
+  // Capacitor Android WebView origin (https://localhost with empty port) -> full cloud URL
+  assert.equal(
+    isNativeApkEnvironment({ protocol: 'https:', hostname: 'localhost', port: '' }, false),
+    true
+  );
+  assert.equal(
+    resolveApiUrl(
+      '/api/chat/stream',
+      'https://example-backend.run.app/',
+      { protocol: 'https:', hostname: 'localhost', port: '' },
+      false
+    ),
+    'https://example-backend.run.app/api/chat/stream'
+  );
+});
+

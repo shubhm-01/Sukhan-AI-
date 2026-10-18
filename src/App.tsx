@@ -42,6 +42,10 @@ import {
   detectUserIntent,
 } from './utils/poetryLogic';
 import {
+  resolveApiUrl,
+  executeResilientChatTurn,
+} from './utils/apiClient';
+import {
   db,
   auth,
   onAuthStateChanged,
@@ -211,7 +215,7 @@ export default function App() {
         // Ignore quota errors
       }
       try {
-        await fetch('/api/chats/sync', {
+        await fetch(resolveApiUrl('/api/chats/sync'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ownerId, chats: updatedChats }),
@@ -227,8 +231,11 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const ownerKey = user?.uid || 'guest';
-    fetch(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`)
-      .then((res) => (res.ok ? res.json() : null))
+    fetch(resolveApiUrl(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`))
+      .then((res) => {
+        const ct = res.headers.get('content-type') || '';
+        return res.ok && ct.includes('application/json') ? res.json() : null;
+      })
       .then((data) => {
         if (cancelled || !data || !Array.isArray(data.chats)) return;
         const hasLocal = localStorage.getItem(STORAGE_CHATS_KEY);
@@ -401,7 +408,7 @@ export default function App() {
     );
   };
 
-  // Core AI Streaming & Response Handler
+  // Core AI Streaming & Response Handler (Web + Android APK Resilient)
   const streamAssistantReply = async (
     targetChatId: string,
     conversationMessages: ChatMessageItem[],
@@ -420,181 +427,82 @@ export default function App() {
     };
 
     try {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await executeResilientChatTurn({
+        messages: conversationMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        settings: effectiveSettings,
+        useWebResearch: useWebResearch || settings.enableWebGrounding,
         signal: controller.signal,
-        body: JSON.stringify({
-          messages: conversationMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          settings: effectiveSettings,
-          useWebResearch: useWebResearch || settings.enableWebGrounding,
-        }),
+        onChunk: (accumulatedText) => {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === targetChatId
+                ? {
+                    ...c,
+                    updatedAt: new Date().toISOString(),
+                    messages: c.messages.map((m) =>
+                      m.id === assistantMsgId
+                        ? {
+                            ...m,
+                            content: accumulatedText,
+                            isStreaming: true,
+                          }
+                        : m
+                    ),
+                  }
+                : c
+            )
+          );
+        },
+        onComplete: async (finalContent, groundingSources) => {
+          const now = new Date().toISOString();
+          const finalMsg: ChatMessageItem = {
+            id: assistantMsgId,
+            chatId: targetChatId,
+            ownerId: user?.uid || 'guest',
+            role: 'assistant',
+            content: finalContent,
+            feedback: 'none',
+            createdAt: now,
+            updatedAt: now,
+            isStreaming: false,
+            groundingSources,
+          };
+
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === targetChatId
+                ? {
+                    ...c,
+                    updatedAt: now,
+                    messages: c.messages.map((m) =>
+                      m.id === assistantMsgId ? finalMsg : m
+                    ),
+                  }
+                : c
+            )
+          );
+          await persistMessageToFirestore(targetChatId, finalMsg);
+        },
       });
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Server returned status ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulatedText = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        for (const evt of events) {
-          const line = evt.trim();
-          if (!line.startsWith('data:')) continue;
-          const jsonStr = line.replace(/^data:\s*/, '');
-          try {
-            const payload = JSON.parse(jsonStr);
-            if (payload.text) {
-              accumulatedText += payload.text;
-              setChats((prev) =>
-                prev.map((c) =>
-                  c.id === targetChatId
-                    ? {
-                        ...c,
-                        updatedAt: new Date().toISOString(),
-                        messages: c.messages.map((m) =>
-                          m.id === assistantMsgId
-                            ? {
-                                ...m,
-                                content: accumulatedText,
-                                isStreaming: true,
-                              }
-                            : m
-                        ),
-                      }
-                    : c
-                )
-              );
-            }
-            if (payload.done) {
-              const finalContent = payload.fullText || accumulatedText;
-              const now = new Date().toISOString();
-              const finalMsg: ChatMessageItem = {
-                id: assistantMsgId,
-                chatId: targetChatId,
-                ownerId: user?.uid || 'guest',
-                role: 'assistant',
-                content: finalContent,
-                feedback: 'none',
-                createdAt: now,
-                updatedAt: now,
-                isStreaming: false,
-                groundingSources: payload.groundingSources,
-              };
-
-              setChats((prev) =>
-                prev.map((c) =>
-                  c.id === targetChatId
-                    ? {
-                        ...c,
-                        updatedAt: now,
-                        messages: c.messages.map((m) =>
-                          m.id === assistantMsgId ? finalMsg : m
-                        ),
-                      }
-                    : c
-                )
-              );
-              await persistMessageToFirestore(targetChatId, finalMsg);
-            }
-          } catch {
-            // Ignore malformed SSE chunk
-          }
-        }
-      }
-    } catch (streamErr) {
-      if (streamErr instanceof Error && streamErr.name === 'AbortError') {
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
         return;
       }
-      // Fallback to unary endpoint if SSE stream is interrupted
-      try {
-        const fallbackRes = await fetch('/api/chat/message', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            messages: conversationMessages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            settings: effectiveSettings,
-            useWebResearch: useWebResearch || settings.enableWebGrounding,
-          }),
-        });
-
-        if (!fallbackRes.ok) {
-          throw new Error('Failed to generate response.');
-        }
-
-        const data = await fallbackRes.json();
-        const now = new Date().toISOString();
-        const finalMsg: ChatMessageItem = {
-          id: assistantMsgId,
-          chatId: targetChatId,
-          ownerId: user?.uid || 'guest',
-          role: 'assistant',
-          content: data.reply,
-          feedback: 'none',
-          createdAt: now,
-          updatedAt: now,
-          isStreaming: false,
-          groundingSources: data.groundingSources,
-        };
-
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === targetChatId
-              ? {
-                  ...c,
-                  updatedAt: now,
-                  messages: c.messages.map((m) =>
-                    m.id === assistantMsgId ? finalMsg : m
-                  ),
-                }
-              : c
-          )
-        );
-        await persistMessageToFirestore(targetChatId, finalMsg);
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          return;
-        }
-        setErrorBanner({
-          message:
-            err instanceof Error
-              ? err.message
-              : 'Connection interrupted while generating response. Please retry.',
-          retryAction: () =>
-            streamAssistantReply(
-              targetChatId,
-              conversationMessages,
-              assistantMsgId
-            ),
-        });
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === targetChatId
-              ? {
-                  ...c,
-                  messages: c.messages.filter((m) => m.id !== assistantMsgId),
-                }
-              : c
-          )
-        );
-      }
+      setErrorBanner({
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Connection interrupted while generating response. Please retry.',
+        retryAction: () =>
+          streamAssistantReply(
+            targetChatId,
+            conversationMessages,
+            assistantMsgId
+          ),
+      });
     } finally {
       abortControllerRef.current = null;
       setIsStreaming(false);
@@ -994,7 +902,7 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen w-full overflow-hidden flex bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+    <div className="h-[100dvh] w-full overflow-hidden flex bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       {/* Left ChatGPT-Style Sidebar */}
       <ChatSidebar
         chats={chats}

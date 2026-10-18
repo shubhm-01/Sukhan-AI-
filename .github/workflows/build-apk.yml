@@ -1,0 +1,91 @@
+name: Build Sukhan AI Android APK
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    name: Build Sukhan AI Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install web dependencies & Capacitor Android packages
+        run: |
+          npm install --legacy-peer-deps
+          npm install @capacitor/core@^7.0.0 @capacitor/cli@^7.0.0 @capacitor/android@^7.0.0 --save-exact --legacy-peer-deps
+
+      - name: Build production web bundle (dist)
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://ais-pre-m7cowsebvej45ggftmn4g5-483207363695.asia-southeast1.run.app' }}
+          VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          npm run build
+
+      - name: Initialize & sync Capacitor Android project
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Configure AndroidManifest permissions, cleartext traffic & keyboard resize
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            node -e '
+              const fs = require("fs");
+              const p = "android/app/src/main/AndroidManifest.xml";
+              let xml = fs.readFileSync(p, "utf8");
+              if (!xml.includes("android:usesCleartextTraffic")) {
+                xml = xml.replace("<application", "<application android:usesCleartextTraffic=\"true\"");
+              }
+              if (!xml.includes("android:windowSoftInputMode")) {
+                xml = xml.replace("<activity", "<activity android:windowSoftInputMode=\"adjustResize\"");
+              }
+              if (!xml.includes("android.permission.INTERNET")) {
+                xml = xml.replace("</manifest>", "    <uses-permission android:name=\"android.permission.INTERNET\" />\n</manifest>");
+              }
+              fs.writeFileSync(p, xml, "utf8");
+            '
+          fi
+
+      - name: Build Android Debug APK with Gradle
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Prepare installable Sukhan-AI.apk
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk ./Sukhan-AI.apk
+          ls -lh ./Sukhan-AI.apk
+
+      - name: Upload Sukhan-AI APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sukhan-AI-Android-APK
+          path: |
+            ./Sukhan-AI.apk
+            android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
