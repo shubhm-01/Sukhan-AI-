@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { apiUrl } from '../lib/api';
 import {
   Copy,
   Check,
@@ -95,7 +96,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
     setIsReciting(true);
     try {
-      const res = await fetch('/api/poetry/recite', {
+      const res = await fetch(apiUrl('/api/poetry/recite'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: cleanText }),
