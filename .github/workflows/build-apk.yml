@@ -93,9 +93,12 @@ jobs:
 
       - name: Build production web bundle (dist)
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://ais-pre-m7cowsebvej45ggftmn4g5-483207363695.asia-southeast1.run.app' }}
-          VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VITE_API_BASE_URL: ${{ vars.SUKHAN_API_BASE_URL }}
         run: |
+          if [[ "${VITE_API_BASE_URL}" != https://* ]]; then
+            echo "::error::Set the repository Actions variable SUKHAN_API_BASE_URL to the HTTPS URL of the deployed Sukhan AI backend before building an APK."
+            exit 1
+          fi
           npm run build
 
       - name: Initialize & sync Capacitor Android project
