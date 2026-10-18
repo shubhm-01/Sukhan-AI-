@@ -8,7 +8,7 @@ on:
       - 'src/**'
       - 'index.html'
       - 'package.json'
-      - 'capacitor.config.ts'
+      - 'capacitor.config.json'
       - '.github/workflows/android-apk.yml'
   pull_request:
     branches:
@@ -17,7 +17,7 @@ on:
       - 'src/**'
       - 'index.html'
       - 'package.json'
-      - 'capacitor.config.ts'
+      - 'capacitor.config.json'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
     inputs:
