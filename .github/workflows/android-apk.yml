@@ -22,9 +22,14 @@ on:
   workflow_dispatch:
     inputs:
       api_base_url:
-        description: 'HTTPS base URL for the deployed Sukhan AI Express API (e.g. https://api.example.com). Leave blank only for a UI/package smoke test.'
+        description: 'HTTPS base URL for the deployed Sukhan AI Express API (e.g. https://api.example.com).'
         required: false
         type: string
+      allow_ui_only:
+        description: 'Allow a UI-only APK without AI/backend connectivity (testing only).'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,6 +45,7 @@ jobs:
     timeout-minutes: 30
     env:
       VITE_API_BASE_URL: ${{ inputs.api_base_url || vars.SUKHAN_API_BASE_URL }}
+      ALLOW_UI_ONLY_BUILD: ${{ inputs.allow_ui_only || false }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -69,8 +75,11 @@ jobs:
               https://*) echo "HTTPS API base URL configured." ;;
               *) echo "::error::VITE_API_BASE_URL must use HTTPS."; exit 1 ;;
             esac
+          elif [ "${ALLOW_UI_ONLY_BUILD}" = "true" ]; then
+            echo "::warning::Building a UI-only APK by explicit request; AI/server API calls will not work."
           else
-            echo "::warning::No API base URL configured. The APK can be installed for UI testing, but AI/server API calls will not work until VITE_API_BASE_URL is configured."
+            echo "::error::No API base URL configured. Deploy the Express backend and set the workflow input api_base_url or repository variable SUKHAN_API_BASE_URL. For a UI-only smoke test, explicitly set allow_ui_only=true."
+            exit 1
           fi
 
       - name: Install JavaScript dependencies
