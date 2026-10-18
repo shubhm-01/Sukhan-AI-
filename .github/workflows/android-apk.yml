@@ -10,6 +10,15 @@ on:
       - 'package.json'
       - 'capacitor.config.ts'
       - '.github/workflows/android-apk.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'package.json'
+      - 'capacitor.config.ts'
+      - '.github/workflows/android-apk.yml'
   workflow_dispatch:
     inputs:
       api_base_url:
