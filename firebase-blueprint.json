@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "Chat": {
+      "title": "Chat",
+      "description": "A conversational thread owned by a specific authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns this conversation.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the conversation.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "saved": {
+          "type": "boolean",
+          "description": "Whether the conversation is bookmarked/saved by the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the conversation was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the conversation was last updated."
+        }
+      },
+      "required": ["ownerId", "title", "saved", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "An individual message within a Chat thread.",
+      "type": "object",
+      "properties": {
+        "chatId": {
+          "type": "string",
+          "description": "ID of the parent Chat document.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns this message and parent chat.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "description": "Sender role of the message.",
+          "enum": ["user", "assistant"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Text and poetic markdown content of the message.",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "feedback": {
+          "type": "string",
+          "description": "User rating feedback on an assistant message.",
+          "enum": ["none", "up", "down"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was last modified."
+        }
+      },
+      "required": ["chatId", "ownerId", "role", "content", "feedback", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/Chat" },
+      "description": "Top-level collection of user conversations."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Subcollection of messages belonging to a specific conversation."
+    }
+  }
+}

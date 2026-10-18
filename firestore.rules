@@ -1,0 +1,163 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Validation Blueprint: Chat
+    function isValidChat(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'saved', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'title', 'saved', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 200
+        && data.saved is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: ChatMessage
+    function isValidChatMessage(data, chatId) {
+      return data.keys().hasAll(['chatId', 'ownerId', 'role', 'content', 'feedback', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['chatId', 'ownerId', 'role', 'content', 'feedback', 'createdAt', 'updatedAt'])
+        && data.chatId is string
+        && data.chatId.size() >= 1
+        && data.chatId.size() <= 128
+        && data.chatId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.chatId == chatId
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.role is string
+        && data.role.size() <= 16
+        && (data.role == 'user' || data.role == 'assistant')
+        && data.content is string
+        && data.content.size() >= 1
+        && data.content.size() <= 20000
+        && data.feedback is string
+        && data.feedback.size() <= 10
+        && (data.feedback == 'none' || data.feedback == 'up' || data.feedback == 'down')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection: /chats/{chatId}
+    match /chats/{chatId} {
+      allow get: if isVerifiedUser()
+        && isValidId(chatId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerifiedUser()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(chatId)
+        && isValidChat(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(chatId)
+        && isValidChat(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Rename or update timestamp
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt']) ||
+          // Action 2: Toggle saved bookmark
+          incoming().diff(existing()).affectedKeys().hasOnly(['saved', 'updatedAt']) ||
+          // Action 3: Touch updatedAt on new message activity
+          incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']) ||
+          // Action 4: Combined title and saved update
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'saved', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(chatId)
+        && existing().ownerId == request.auth.uid;
+
+      // Subcollection: /chats/{chatId}/messages/{messageId}
+      match /messages/{messageId} {
+        allow get: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && existing().ownerId == request.auth.uid
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid;
+
+        allow list: if isVerifiedUser()
+          && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming(), chatId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming(), chatId)
+          && existing().ownerId == request.auth.uid
+          && incoming().ownerId == existing().ownerId
+          && incoming().chatId == existing().chatId
+          && incoming().role == existing().role
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action 1: Edit message content (or regenerate)
+            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt']) ||
+            // Action 2: Give feedback (up/down/none)
+            incoming().diff(existing()).affectedKeys().hasOnly(['feedback', 'updatedAt']) ||
+            // Action 3: Update content and reset feedback
+            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'feedback', 'updatedAt'])
+          )
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid;
+
+        allow delete: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && existing().ownerId == request.auth.uid
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid;
+      }
+    }
+  }
+}

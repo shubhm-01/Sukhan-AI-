@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@layer base {
+  :root,
+  [data-theme="dark"] {
+    --bg-canvas: #0B070E;
+    --bg-sidebar: #08050B;
+    --bg-surface: #130D18;
+    --bg-elevated: #1B1222;
+    --bg-verse: #170F1E;
+    --text-primary: #F5EFE6;
+    --text-secondary: #C8BDB0;
+    --text-muted: #8E8276;
+    --accent-gold: #D4AF6A;
+    --accent-gold-hover: #E5C687;
+    --accent-fg: #0B070E;
+    --border-subtle: rgba(212, 175, 106, 0.16);
+    --border-strong: rgba(212, 175, 106, 0.35);
+  }
+
+  [data-theme="light"] {
+    --bg-canvas: #FBF8F3;
+    --bg-sidebar: #F3ECE1;
+    --bg-surface: #FFFFFF;
+    --bg-elevated: #EFE7DA;
+    --bg-verse: #F7F1E6;
+    --text-primary: #1C1613;
+    --text-secondary: #4A3F37;
+    --text-muted: #786B5E;
+    --accent-gold: #9A6B1F;
+    --accent-gold-hover: #7D5516;
+    --accent-fg: #FFFFFF;
+    --border-subtle: rgba(154, 107, 31, 0.18);
+    --border-strong: rgba(154, 107, 31, 0.4);
+  }
+
+  body, button, input, select, textarea {
+    font-family: 'Plus Jakarta Sans', 'Noto Naskh Arabic', 'Noto Serif Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+    overflow-x: hidden;
+  }
+}
+
+.font-display {
+  font-family: 'Cormorant Garamond', 'Noto Naskh Arabic', 'Noto Serif Devanagari', Georgia, serif;
+}
+
+.font-urdu {
+  font-family: 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Cormorant Garamond', serif;
+  line-height: 2.3;
+}
+
+.font-hindi {
+  font-family: 'Noto Serif Devanagari', 'Cormorant Garamond', serif;
+  line-height: 1.95;
+}
+
+.font-mono-tabular {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.diwan-page-shadow {
+  box-shadow: 0 20px 50px -15px rgba(0, 0, 0, 0.45);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
