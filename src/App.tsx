@@ -22,6 +22,7 @@ import {
   BookOpen,
   Square,
 } from 'lucide-react';
+import { apiUrl } from './lib/api';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
 import { FarhangView } from './components/FarhangView';
@@ -211,7 +212,7 @@ export default function App() {
         // Ignore quota errors
       }
       try {
-        await fetch('/api/chats/sync', {
+        await fetch(apiUrl('/api/chats/sync'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ownerId, chats: updatedChats }),
@@ -227,7 +228,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const ownerKey = user?.uid || 'guest';
-    fetch(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`)
+    fetch(apiUrl(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data || !Array.isArray(data.chats)) return;
@@ -420,7 +421,7 @@ export default function App() {
     };
 
     try {
-      const response = await fetch('/api/chat/stream', {
+      const response = await fetch(apiUrl('/api/chat/stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -521,7 +522,7 @@ export default function App() {
       }
       // Fallback to unary endpoint if SSE stream is interrupted
       try {
-        const fallbackRes = await fetch('/api/chat/message', {
+        const fallbackRes = await fetch(apiUrl('/api/chat/message'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
