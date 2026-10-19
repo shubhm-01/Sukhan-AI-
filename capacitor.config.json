@@ -2,20 +2,20 @@
   "appId": "com.sukhan.ai",
   "appName": "Sukhan AI",
   "webDir": "dist",
+  "backgroundColor": "#0E0B14",
   "server": {
     "androidScheme": "https",
     "cleartext": true,
     "allowNavigation": [
       "*.run.app",
       "*.googleapis.com",
+      "*.firebaseio.com",
       "*.firebaseapp.com",
-      "*.google.com"
+      "text.pollinations.ai"
     ]
   },
   "android": {
     "allowMixedContent": true,
-    "captureInput": true,
-    "webContentsDebuggingEnabled": true,
-    "backgroundColor": "#0B070E"
+    "backgroundColor": "#0E0B14"
   }
 }

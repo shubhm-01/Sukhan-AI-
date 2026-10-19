@@ -90,11 +90,11 @@ async function testConnection() {
       error instanceof Error &&
       error.message.includes('the client is offline')
     ) {
-      console.error('Please check your Firebase configuration.');
+      console.warn('Firestore client is currently offline; local persistence active.');
     }
   }
 }
-testConnection();
+void testConnection();
 
 export async function signInWithGoogle(): Promise<User | null> {
   const provider = new GoogleAuthProvider();

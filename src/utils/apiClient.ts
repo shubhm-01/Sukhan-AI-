@@ -1,5 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { buildContextualChatReply } from './poetryLogic.ts';
+import {
+  buildContextualChatReply,
+  detectUserIntent,
+} from './poetryLogic.ts';
 import type { UserSettings, GroundingSource } from './poetryLogic.ts';
 
 /**
@@ -12,7 +15,10 @@ export function isNativeApkEnvironment(
   hasCapacitorGlobal?: boolean
 ): boolean {
   if (hasCapacitorGlobal) return true;
-  if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.()) {
+  if (
+    typeof window !== 'undefined' &&
+    (window as any).Capacitor?.isNativePlatform?.()
+  ) {
     return true;
   }
 
@@ -34,10 +40,7 @@ export function isNativeApkEnvironment(
   }
 
   // Capacitor Android serves bundled assets from https://localhost (port '') or http://localhost (port '')
-  if (
-    currentLoc.hostname === 'localhost' &&
-    !currentLoc.port
-  ) {
+  if (currentLoc.hostname === 'localhost' && !currentLoc.port) {
     return true;
   }
 
@@ -76,7 +79,8 @@ export function resolveApiUrl(
 }
 
 export function buildClientChatSystemInstruction(
-  settings?: Partial<UserSettings>
+  settings?: Partial<UserSettings>,
+  userIntent?: string
 ): string {
   const scriptPref =
     settings?.defaultScript === 'urdu'
@@ -91,6 +95,13 @@ export function buildClientChatSystemInstruction(
     ? `When composing poetry, use this poetic sensibility: ${settings.poeticStyle.replace('_', ' ')}.`
     : 'When composing poetry, balance Classical Ustad & Modern Literary sensibility.';
 
+  const intentDirective =
+    userIntent === 'greeting'
+      ? 'IMMEDIATE TURN RULE: The user just sent a casual greeting ("hi", "hii", "hello", "kaise ho", "salam", etc.). Reply ONLY with a natural, warm, friendly conversational greeting in 1-3 sentences. DO NOT write any poem, couplet, sher, ghazal, shayari, or [VERSE] block in this response.'
+      : userIntent === 'general_chat'
+      ? 'IMMEDIATE TURN RULE: The user is having a normal conversation or asking a general question—NOT asking for a poem. Answer naturally and directly like ChatGPT. DO NOT generate unsolicited poetry or [VERSE] blocks unless the user explicitly asked for verses.'
+      : 'IMMEDIATE TURN RULE: The user is requesting poetry, literary explanation, or refinement. Provide a rich literary response and wrap verse lines inside [VERSE] and [/VERSE] tags.';
+
   return [
     'You are Sukhan AI — an intelligent, warm, ChatGPT-style conversational AI assistant with deep mastery of Urdu poetry, Roman Urdu shayari, Hindi kavita, ghazals, nazms, and literary culture.',
     'CRITICAL RULE — DO NOT AUTO-GENERATE POETRY UNLESS ASKED:',
@@ -98,6 +109,7 @@ export function buildClientChatSystemInstruction(
     '- ONLY compose poetry, shayari, ghazals, nazms, or couplets when the user EXPLICITLY asks you to write/compose poetry or refine an existing poem in the conversation.',
     '- When (and ONLY when) you output poetry verses, wrap the verse lines inside [VERSE] and [/VERSE] tags with preserved line breaks (2 lines per couplet, blank line between couplets).',
     '- Maintain full multi-turn context across the conversation.',
+    intentDirective,
     scriptPref,
     stylePref,
     settings?.showTranslations !== false
@@ -114,22 +126,60 @@ export interface ChatTurnOptions {
   useWebResearch: boolean;
   signal: AbortSignal;
   onChunk: (accumulatedText: string) => void;
-  onComplete: (finalText: string, groundingSources?: GroundingSource[]) => Promise<void> | void;
+  onComplete: (
+    finalText: string,
+    groundingSources?: GroundingSource[]
+  ) => Promise<void> | void;
+}
+
+async function streamTextIncrementally(
+  fullText: string,
+  signal: AbortSignal,
+  onChunk: (accumulatedText: string) => void,
+  onComplete: (
+    finalText: string,
+    groundingSources?: GroundingSource[]
+  ) => Promise<void> | void,
+  groundingSources?: GroundingSource[]
+): Promise<void> {
+  const words = fullText.split(/(?<=\s)/);
+  let accumulated = '';
+  for (let i = 0; i < words.length; i += 6) {
+    if (signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    accumulated += words.slice(i, i + 6).join('');
+    onChunk(accumulated);
+    await new Promise((r) => setTimeout(r, 16));
+  }
+  await onComplete(fullText, groundingSources);
 }
 
 /**
- * Executes a conversational turn across 4 resilient tiers so that both the Web App
- * and the installed Android APK work identically under all network conditions:
+ * Executes a conversational turn across 5 resilient tiers so that both the Web App
+ * and the installed Android APK work identically under all conditions:
  *  1. Backend SSE Stream (/api/chat/stream)
  *  2. Backend Unary JSON (/api/chat/message)
  *  3. Direct Client Gemini SDK (when VITE_GEMINI_API_KEY is configured in APK build)
- *  4. Built-in On-Device Sukhan Conversational & Literary Engine (offline / zero-config APK fallback)
+ *  4. Live Cloud AI Endpoint (https://text.pollinations.ai/openai — zero-key live LLM for standalone APK)
+ *  5. Built-in On-Device Sukhan Conversational & Literary Engine (offline fallback)
  */
 export async function executeResilientChatTurn(
   options: ChatTurnOptions
 ): Promise<void> {
   const { messages, settings, useWebResearch, signal, onChunk, onComplete } =
     options;
+
+  const lastUserMsg =
+    [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+  const prevAssistantMsg =
+    [...messages].reverse().find((m) => m.role === 'assistant')?.content || '';
+  const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
+  const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+  const systemInstruction = buildClientChatSystemInstruction(
+    settings,
+    userIntent
+  );
 
   // Tier 1: Backend SSE Stream (/api/chat/stream)
   try {
@@ -219,7 +269,13 @@ export async function executeResilientChatTurn(
     if (fallbackRes.ok && contentType.includes('application/json')) {
       const data = await fallbackRes.json();
       if (data && typeof data.reply === 'string' && data.reply.trim()) {
-        await onComplete(data.reply.trim(), data.groundingSources);
+        await streamTextIncrementally(
+          data.reply.trim(),
+          signal,
+          onChunk,
+          onComplete,
+          data.groundingSources
+        );
         return;
       }
     }
@@ -239,13 +295,16 @@ export async function executeResilientChatTurn(
   if (clientApiKey && clientApiKey !== 'MY_GEMINI_API_KEY') {
     try {
       const ai = new GoogleGenAI({ apiKey: clientApiKey });
-      const systemInstruction = buildClientChatSystemInstruction(settings);
       const formattedContents = messages.slice(-16).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
       }));
 
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      const modelsToTry = [
+        'gemini-3.8-flash',
+        'gemini-3.1-flash-lite',
+        'gemini-2.5-flash',
+      ];
       for (const modelId of modelsToTry) {
         if (signal.aborted) {
           throw new DOMException('Aborted', 'AbortError');
@@ -261,8 +320,12 @@ export async function executeResilientChatTurn(
             },
           });
 
-          const text = response.text?.trim();
-          if (text) {
+          const rawText = response.text?.trim();
+          if (rawText) {
+            const cleanedText =
+              userIntent === 'greeting'
+                ? rawText.replace(/\[\/?VERSE\]/gi, '')
+                : rawText;
             const groundingSources: GroundingSource[] = [];
             const chunks =
               response.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -278,8 +341,11 @@ export async function executeResilientChatTurn(
                 }
               }
             }
-            await onComplete(
-              text,
+            await streamTextIncrementally(
+              cleanedText,
+              signal,
+              onChunk,
+              onComplete,
               groundingSources.length > 0 ? groundingSources : undefined
             );
             return;
@@ -296,24 +362,59 @@ export async function executeResilientChatTurn(
     }
   }
 
-  // Tier 4: On-Device Sukhan Conversational & Literary Engine
-  // Guarantees the installed Android APK works seamlessly even offline or without cloud cookies
+  // Tier 4: Live Cloud AI Endpoint (Works inside the installed Android APK with zero API key setup!)
+  try {
+    const openAiMessages = [
+      { role: 'system', content: systemInstruction },
+      ...messages.slice(-14).map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    ];
+
+    const cloudRes = await fetch('https://text.pollinations.ai/openai', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal,
+      body: JSON.stringify({
+        model: 'openai',
+        messages: openAiMessages,
+        temperature: 0.75,
+      }),
+    });
+
+    if (cloudRes.ok) {
+      const cloudData = await cloudRes.json();
+      const cloudText =
+        cloudData?.choices?.[0]?.message?.content?.trim() || '';
+      if (cloudText) {
+        const cleanedCloudText =
+          userIntent === 'greeting'
+            ? cloudText.replace(/\[\/?VERSE\]/gi, '')
+            : cloudText;
+        await streamTextIncrementally(
+          cleanedCloudText,
+          signal,
+          onChunk,
+          onComplete
+        );
+        return;
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw err;
+    }
+    // Proceed to Tier 5
+  }
+
+  // Tier 5: On-Device Sukhan Conversational & Literary Engine (Offline Fallback)
   if (signal.aborted) {
     throw new DOMException('Aborted', 'AbortError');
   }
 
   const localReply = buildContextualChatReply(messages, settings);
-  const words = localReply.split(/(?<=\s)/);
-  let accumulated = '';
-
-  for (let i = 0; i < words.length; i += 6) {
-    if (signal.aborted) {
-      throw new DOMException('Aborted', 'AbortError');
-    }
-    accumulated += words.slice(i, i + 6).join('');
-    onChunk(accumulated);
-    await new Promise((r) => setTimeout(r, 18));
-  }
-
-  await onComplete(localReply);
+  await streamTextIncrementally(localReply, signal, onChunk, onComplete);
 }
