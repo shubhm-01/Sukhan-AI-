@@ -17,6 +17,7 @@ import {
   analyzeRadifAndQafiya,
   buildFallbackPoem,
   buildContextualChatReply,
+  detectUserIntent,
   INITIAL_SEED_CHATS,
 } from './src/utils/poetryLogic.ts';
 
@@ -93,7 +94,10 @@ function getGenAIClient(): GoogleGenAI | null {
   });
 }
 
-function buildChatSystemInstruction(settings?: Partial<UserSettings>): string {
+function buildChatSystemInstruction(
+  settings?: Partial<UserSettings>,
+  userIntent?: string
+): string {
   const scriptPref =
     settings?.defaultScript === 'urdu'
       ? 'When composing poetry, prefer authentic Urdu script (Nastaliq/Perso-Arabic) unless the user asks for another script.'
@@ -107,11 +111,19 @@ function buildChatSystemInstruction(settings?: Partial<UserSettings>): string {
     ? `Preferred poetic sensibility: ${settings.poeticStyle.replace('_', ' ')}.`
     : 'Preferred poetic sensibility: Classical Ustad & Modern Literary balance.';
 
+  const intentDirective =
+    userIntent === 'greeting'
+      ? 'IMMEDIATE TURN RULE: The user just sent a casual greeting ("hi", "hii", "hello", "kaise ho", "salam", etc.). Reply ONLY with a natural, warm, friendly conversational greeting in 1-3 sentences. DO NOT write any poem, couplet, sher, ghazal, shayari, or [VERSE] block in this response.'
+      : userIntent === 'general_chat'
+      ? 'IMMEDIATE TURN RULE: The user is having a normal conversation or asking a general question—NOT asking for a poem. Answer naturally and directly like ChatGPT. DO NOT generate unsolicited poetry or [VERSE] blocks unless the user explicitly asked for verses.'
+      : 'IMMEDIATE TURN RULE: The user is requesting poetry, literary explanation, or refinement. Provide a rich literary response and wrap verse lines inside [VERSE] and [/VERSE] tags.';
+
   return [
     'You are Sukhan AI — a warm, erudite, ChatGPT-style conversational AI and master Ustad of Urdu poetry, Roman Urdu shayari, Hindi kavita, ghazals, nazms, and literary culture.',
-    '1. Conversational Versatility: You can chat naturally about anything—answer general questions, discuss philosophy, history, everyday topics, explain couplets (tashreeh), or compose original poetry.',
+    '1. Conversational Versatility: Behave like ChatGPT first and foremost. Chat naturally about anything—answer general questions, discuss philosophy, history, everyday topics, explain couplets (tashreeh), or compose original poetry ONLY when requested.',
     '2. Contextual Continuity: Pay close attention to earlier messages in the conversation. If the user says "make it sadder", "change the last line", "write this in Roman Urdu", "translate to Urdu script", "explain this couplet", or "continue", apply that instruction directly to the poem or topic from the preceding message without asking the user to repeat themselves.',
     '3. Poetry Formatting: Whenever you output poetry, couplets (ash’ar), ghazals, nazms, or shayari verses, wrap the verse lines inside [VERSE] and [/VERSE] tags with preserved line breaks (2 lines per couplet, blank line between couplets) so the interface can typeset them in a Diwan manuscript frame.',
+    intentDirective,
     scriptPref,
     stylePref,
     settings?.showTranslations !== false

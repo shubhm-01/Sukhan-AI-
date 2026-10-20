@@ -14,6 +14,7 @@ import {
 } from './poetryLogic.ts';
 import {
   isNativeApkEnvironment,
+  hasBackendApiAvailable,
   resolveApiUrl,
 } from './apiClient.ts';
 
@@ -168,6 +169,14 @@ test('isNativeApkEnvironment and resolveApiUrl handle Web vs Capacitor Android A
   // Capacitor Android WebView origin (https://localhost with empty port) -> full cloud URL
   assert.equal(
     isNativeApkEnvironment({ protocol: 'https:', hostname: 'localhost', port: '' }, false),
+    true
+  );
+  assert.equal(
+    hasBackendApiAvailable('', { protocol: 'https:', hostname: 'localhost', port: '' }, false),
+    false
+  );
+  assert.equal(
+    hasBackendApiAvailable('https://example-backend.run.app', { protocol: 'https:', hostname: 'localhost', port: '' }, false),
     true
   );
   assert.equal(

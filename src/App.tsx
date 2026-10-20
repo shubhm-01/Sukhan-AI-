@@ -43,6 +43,7 @@ import {
 } from './utils/poetryLogic';
 import {
   resolveApiUrl,
+  hasBackendApiAvailable,
   executeResilientChatTurn,
 } from './utils/apiClient';
 import {
@@ -214,6 +215,7 @@ export default function App() {
       } catch {
         // Ignore quota errors
       }
+      if (!hasBackendApiAvailable()) return;
       try {
         await fetch(resolveApiUrl('/api/chats/sync'), {
           method: 'POST',
@@ -229,6 +231,7 @@ export default function App() {
 
   // Initial load from server persistent store if localStorage wasn't populated
   useEffect(() => {
+    if (!hasBackendApiAvailable()) return;
     let cancelled = false;
     const ownerKey = user?.uid || 'guest';
     fetch(resolveApiUrl(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`))

@@ -18,7 +18,7 @@ import {
   segmentMessageContent,
   detectLanguageAndScript,
 } from '../utils/poetryLogic';
-import { resolveApiUrl } from '../utils/apiClient';
+import { resolveApiUrl, hasBackendApiAvailable } from '../utils/apiClient';
 
 interface ChatMessageBubbleProps {
   message: ChatMessageItem;
@@ -95,28 +95,30 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     }
 
     setIsReciting(true);
-    try {
-      const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: cleanText }),
-      });
-      const ct = res.headers.get('content-type') || '';
-      if (res.ok && ct.includes('application/json')) {
-        const data = await res.json();
-        if (data.audioBase64) {
-          const audio = new Audio(
-            `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`
-          );
-          audioRef.current = audio;
-          audio.onended = () => setIsReciting(false);
-          audio.onerror = () => setIsReciting(false);
-          await audio.play();
-          return;
+    if (hasBackendApiAvailable()) {
+      try {
+        const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanText }),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const data = await res.json();
+          if (data.audioBase64) {
+            const audio = new Audio(
+              `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`
+            );
+            audioRef.current = audio;
+            audio.onended = () => setIsReciting(false);
+            audio.onerror = () => setIsReciting(false);
+            await audio.play();
+            return;
+          }
         }
+      } catch {
+        // Fallback to browser synthesis
       }
-    } catch {
-      // Fallback to browser synthesis
     }
 
     if ('speechSynthesis' in window) {

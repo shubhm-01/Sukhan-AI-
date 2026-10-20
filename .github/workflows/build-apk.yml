@@ -26,81 +26,79 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK & Accept Licenses
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Accept Android SDK Licenses
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Normalize package.json for public npm registry & ensure Firebase config
         run: |
-          rm -f bun.lock package-lock.json
-          node -e '
-            const fs = require("fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.dependencies = {
-              "@capacitor/android": "^7.0.0",
-              "@capacitor/cli": "^7.0.0",
-              "@capacitor/core": "^7.0.0",
-              "@fontsource/cormorant-garamond": "^5.1.0",
-              "@fontsource/noto-naskh-arabic": "^5.1.0",
-              "@fontsource/noto-serif-devanagari": "^5.1.0",
-              "@fontsource/plus-jakarta-sans": "^5.1.0",
-              "@google/genai": "^1.0.0",
-              "@tailwindcss/vite": "^4.0.0",
-              "@vitejs/plugin-react": "^4.3.0",
-              "dotenv": "^16.4.0",
-              "express": "^4.21.0",
-              "firebase": "^11.0.0",
-              "lucide-react": "^0.460.0",
-              "motion": "^12.0.0",
-              "react": "^19.0.0",
-              "react-dom": "^19.0.0",
-              "vite": "^6.0.0"
-            };
-            pkg.devDependencies = {
-              "@types/express": "^4.17.21",
-              "@types/node": "^22.0.0",
-              "@types/react": "^19.0.0",
-              "@types/react-dom": "^19.0.0",
-              "autoprefixer": "^10.4.20",
-              "esbuild": "^0.24.0",
-              "tailwindcss": "^4.0.0",
-              "tsx": "^4.19.0",
-              "typescript": "^5.7.0"
-            };
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n", "utf8");
-
-            if (!fs.existsSync("firebase-applet-config.json")) {
-              const fbConfig = {
-                projectId: "ai-studio-sukhanai",
-                appId: "1:1066844348486:web:81cf9ff24d07d92be4c3f9",
-                apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKeyForBuild",
-                authDomain: "ai-studio-sukhanai.firebaseapp.com",
-                firestoreDatabaseId: "ai-studio-sukhanai-4d175da9-2da9-4f4a-8c4a-b0bd756154f2",
-                storageBucket: "ai-studio-sukhanai.firebasestorage.app",
-                messagingSenderId: "1066844348486",
-                measurementId: ""
+          if [ -f "scripts/prepare-apk-build.mjs" ]; then
+            node scripts/prepare-apk-build.mjs
+          else
+            rm -f bun.lock package-lock.json yarn.lock pnpm-lock.yaml
+            node -e '
+              const fs = require("fs");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              pkg.dependencies = {
+                "@capacitor/android": "^7.0.0",
+                "@capacitor/cli": "^7.0.0",
+                "@capacitor/core": "^7.0.0",
+                "@fontsource/cormorant-garamond": "^5.1.0",
+                "@fontsource/noto-naskh-arabic": "^5.1.0",
+                "@fontsource/noto-serif-devanagari": "^5.1.0",
+                "@fontsource/plus-jakarta-sans": "^5.1.0",
+                "@google/genai": "^1.0.0",
+                "@tailwindcss/vite": "^4.0.0",
+                "@vitejs/plugin-react": "^4.3.0",
+                "dotenv": "^16.4.0",
+                "express": "^4.21.0",
+                "firebase": "^11.0.0",
+                "lucide-react": "^0.460.0",
+                "motion": "^12.0.0",
+                "react": "^19.0.0",
+                "react-dom": "^19.0.0",
+                "vite": "^6.0.0"
               };
-              fs.writeFileSync("firebase-applet-config.json", JSON.stringify(fbConfig, null, 2) + "\n", "utf8");
-            }
-          '
+              pkg.devDependencies = {
+                "@types/express": "^4.17.21",
+                "@types/node": "^22.0.0",
+                "@types/react": "^19.0.0",
+                "@types/react-dom": "^19.0.0",
+                "autoprefixer": "^10.4.20",
+                "esbuild": "^0.24.0",
+                "tailwindcss": "^4.0.0",
+                "tsx": "^4.19.0",
+                "typescript": "^5.7.0"
+              };
+              fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n", "utf8");
+              if (!fs.existsSync("firebase-applet-config.json")) {
+                fs.writeFileSync("firebase-applet-config.json", JSON.stringify({
+                  projectId: "storied-hawk-tn50x",
+                  appId: "1:117334778546:web:495089c9d869f0a8149fab",
+                  apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDpvVm1a7-UmjL7m0Dj48-C2V1sq6AW5fc",
+                  authDomain: "storied-hawk-tn50x.firebaseapp.com",
+                  firestoreDatabaseId: "ai-studio-sukhanai-4d175da9-2da9-4f4a-8c4a-b0bd756154f2",
+                  storageBucket: "storied-hawk-tn50x.firebasestorage.app",
+                  messagingSenderId: "117334778546",
+                  measurementId: ""
+                }, null, 2) + "\n", "utf8");
+              }
+            '
+          fi
 
       - name: Install dependencies from public npm
         run: |
-          npm install --legacy-peer-deps
+          npm install --no-audit --no-fund --legacy-peer-deps
 
       - name: Build production web bundle (dist)
         env:
-          VITE_API_BASE_URL: ${{ vars.SUKHAN_API_BASE_URL }}
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY || secrets.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || vars.VITE_API_BASE_URL || secrets.SUKHAN_API_BASE_URL || vars.SUKHAN_API_BASE_URL || '' }}
         run: |
-          if [[ "${VITE_API_BASE_URL}" != https://* ]]; then
-            echo "::error::Set the repository Actions variable SUKHAN_API_BASE_URL to the HTTPS URL of the deployed Sukhan AI backend before building an APK."
-            exit 1
-          fi
           npm run build
 
       - name: Initialize & sync Capacitor Android project
@@ -110,24 +108,48 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Configure AndroidManifest permissions, cleartext traffic & keyboard resize
+      - name: Configure AndroidManifest permissions, ProGuard/R8 & Cleartext Traffic
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
+          if [ -f "scripts/patch-android-manifest.mjs" ]; then
+            node scripts/patch-android-manifest.mjs
+          else
             node -e '
               const fs = require("fs");
+              const path = require("path");
+              const xmlDir = "android/app/src/main/res/xml";
+              fs.mkdirSync(xmlDir, { recursive: true });
+              fs.writeFileSync(path.join(xmlDir, "network_security_config.xml"), `<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted="true">\n        <trust-anchors>\n            <certificates src="system" />\n            <certificates src="user" />\n        </trust-anchors>\n    </base-config>\n</network-security-config>\n`, "utf8");
               const p = "android/app/src/main/AndroidManifest.xml";
-              let xml = fs.readFileSync(p, "utf8");
-              if (!xml.includes("android:usesCleartextTraffic")) {
-                xml = xml.replace("<application", "<application android:usesCleartextTraffic=\"true\"");
+              if (fs.existsSync(p)) {
+                let xml = fs.readFileSync(p, "utf8");
+                xml = xml.replace(/\s*<!--\s*Permissions\s*-->/gi, "");
+                xml = xml.replace(/\s*<uses-permission\s+android:name="android\.permission\.(INTERNET|ACCESS_NETWORK_STATE)"\s*\/>/g, "");
+                xml = xml.replace("<application", "    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n\n    <application");
+                if (!xml.includes("android:usesCleartextTraffic")) {
+                  xml = xml.replace("<application", "<application\n        android:usesCleartextTraffic=\"true\"");
+                }
+                if (!xml.includes("android:networkSecurityConfig")) {
+                  xml = xml.replace("<application", "<application\n        android:networkSecurityConfig=\"@xml/network_security_config\"");
+                }
+                if (!xml.includes("android:windowSoftInputMode")) {
+                  xml = xml.replace("<activity", "<activity\n            android:windowSoftInputMode=\"adjustResize\"");
+                }
+                fs.writeFileSync(p, xml, "utf8");
               }
-              if (!xml.includes("android:windowSoftInputMode")) {
-                xml = xml.replace("<activity", "<activity android:windowSoftInputMode=\"adjustResize\"");
+              const gPath = "android/app/build.gradle";
+              if (fs.existsSync(gPath)) {
+                let g = fs.readFileSync(gPath, "utf8");
+                if (!g.includes("shrinkResources false")) {
+                  g = g.replace(/buildTypes\s*\{\s*release\s*\{[\s\S]*?\}\s*\}/m, `buildTypes {\n        debug {\n            minifyEnabled false\n            shrinkResources false\n        }\n        release {\n            minifyEnabled false\n            shrinkResources false\n            signingConfig signingConfigs.debug\n            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"\n        }\n    }`);
+                  fs.writeFileSync(gPath, g, "utf8");
+                }
               }
-              if (!xml.includes("android.permission.INTERNET")) {
-                xml = xml.replace("</manifest>", "    <uses-permission android:name=\"android.permission.INTERNET\" />\n</manifest>");
+              const wPath = "android/gradle/wrapper/gradle-wrapper.properties";
+              if (fs.existsSync(wPath)) {
+                let w = fs.readFileSync(wPath, "utf8");
+                w = w.replace("networkTimeout=10000", "networkTimeout=120000").replace("-all.zip", "-bin.zip");
+                fs.writeFileSync(wPath, w, "utf8");
               }
-              fs.writeFileSync(p, xml, "utf8");
             '
           fi
 
