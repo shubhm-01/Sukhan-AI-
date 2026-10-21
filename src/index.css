@@ -38,11 +38,30 @@
     font-family: 'Plus Jakarta Sans', 'Noto Naskh Arabic', 'Noto Serif Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
   }
 
+  html {
+    min-height: 100%;
+    background-color: var(--bg-canvas);
+    overscroll-behavior: none;
+  }
+
   body {
+    min-height: 100%;
+    margin: 0;
     background-color: var(--bg-canvas);
     color: var(--text-primary);
     letter-spacing: 0.01em;
     overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  button, a, input, textarea, select {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-gold);
+    outline-offset: 2px;
   }
 }
 
