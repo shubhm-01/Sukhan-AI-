@@ -111,6 +111,22 @@ jobs:
           fi
           npx cap sync android
 
+      - name: Apply Sukhan AI launcher icon
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          RES="android/app/src/main/res"
+          for entry in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
+            density="${entry%%:*}"
+            size="${entry##*:}"
+            mkdir -p "$RES/mipmap-$density"
+            rsvg-convert -w "$size" -h "$size" public/favicon.svg > "/tmp/ic_launcher.png"
+            cp "/tmp/ic_launcher.png" "$RES/mipmap-$density/ic_launcher.png"
+            cp "/tmp/ic_launcher.png" "$RES/mipmap-$density/ic_launcher_round.png"
+          done
+          # Remove adaptive-icon XML so Android uses the same shared artwork at every density.
+          rm -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+
       - name: Configure AndroidManifest permissions, ProGuard/R8 & Cleartext Traffic
         run: |
           if [ -f "scripts/patch-android-manifest.mjs" ]; then
