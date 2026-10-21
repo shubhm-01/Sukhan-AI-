@@ -905,7 +905,7 @@ export default function App() {
   );
 
   return (
-    <div className="h-[100dvh] w-full overflow-hidden flex bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+    <div className="box-border h-[100dvh] w-full overflow-hidden flex bg-[var(--bg-canvas)] text-[var(--text-primary)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Left ChatGPT-Style Sidebar */}
       <ChatSidebar
         chats={chats}
@@ -947,7 +947,7 @@ export default function App() {
       {/* Central Workspace Column */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Top Conversation Header */}
-        <header className="h-14 px-4 sm:px-6 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/90 backdrop-blur-md flex items-center justify-between gap-3 shrink-0 z-20">
+        <header className="min-h-14 px-3 sm:px-6 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/90 backdrop-blur-md flex items-center justify-between gap-3 shrink-0 z-20">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
@@ -1137,7 +1137,7 @@ export default function App() {
         </main>
 
         {/* Bottom ChatGPT-Style Composer Dock */}
-        <footer className="px-4 sm:px-6 pb-4 pt-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] shrink-0">
+        <footer className="px-3 sm:px-6 pb-3 sm:pb-4 pt-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] shrink-0">
           <div className="max-w-3xl mx-auto space-y-2.5">
             {/* Contextual Follow-Up Quick Chips ONLY when latest response contains a poem */}
             {showPoetryFollowUpChips && (
