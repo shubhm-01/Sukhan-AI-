@@ -209,7 +209,7 @@ export async function executeResilientChatTurn(
   const prevAssistantMsg =
     [...messages].reverse().find((m) => m.role === 'assistant')?.content || '';
   const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
-  const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+  const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem ? prevAssistantMsg : undefined);
   const systemInstruction = buildClientChatSystemInstruction(
     settings,
     userIntent
