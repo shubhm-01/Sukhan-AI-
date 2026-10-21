@@ -27,13 +27,10 @@ jobs:
           java-version: '21'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          # The action expects one SDK package per line, not a comma-separated list.
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+          # This action expects package names separated by spaces.
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Accept Android SDK Licenses
         run: |
