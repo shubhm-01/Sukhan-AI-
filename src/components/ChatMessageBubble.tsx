@@ -82,12 +82,14 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
   const handleReciteText = async (textToRecite: string) => {
     const cleanText = textToRecite.replace(/\[\/?VERSE\]/gi, '').trim();
+    if (!cleanText) return;
+
     if (isReciting) {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
-      if ('speechSynthesis' in window) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
       setIsReciting(false);
@@ -95,42 +97,76 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     }
 
     setIsReciting(true);
-    if (hasBackendApiAvailable()) {
-      try {
-        const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: cleanText }),
-        });
-        const ct = res.headers.get('content-type') || '';
-        if (res.ok && ct.includes('application/json')) {
-          const data = await res.json();
-          if (data.audioBase64) {
-            const audio = new Audio(
-              `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`
-            );
-            audioRef.current = audio;
-            audio.onended = () => setIsReciting(false);
-            audio.onerror = () => setIsReciting(false);
-            await audio.play();
-            return;
+    try {
+      // Prefer server-generated recitation when a configured backend is available.
+      if (hasBackendApiAvailable()) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+          const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanText }),
+            signal: controller.signal,
+          }).finally(() => window.clearTimeout(timeoutId));
+          const ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.includes('application/json')) {
+            const data = await res.json();
+            if (typeof data.audioBase64 === 'string' && data.audioBase64.length > 0) {
+              const audio = new Audio(
+                `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`
+              );
+              audioRef.current = audio;
+              audio.onended = () => {
+                audioRef.current = null;
+                setIsReciting(false);
+              };
+              audio.onerror = () => {
+                audioRef.current = null;
+                setIsReciting(false);
+              };
+              try {
+                await audio.play();
+                return;
+              } catch {
+                audioRef.current = null;
+              }
+            }
           }
+        } catch {
+          // Network, timeout, or unsupported audio: try device speech synthesis.
         }
-      } catch {
-        // Fallback to browser synthesis
       }
-    }
 
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const det = detectLanguageAndScript(cleanText);
-      const utter = new SpeechSynthesisUtterance(cleanText);
-      utter.rate = 0.9;
-      utter.lang = det.detected === 'urdu' ? 'ur-PK' : 'hi-IN';
-      utter.onend = () => setIsReciting(false);
-      utter.onerror = () => setIsReciting(false);
-      window.speechSynthesis.speak(utter);
-    } else {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window &&
+          typeof SpeechSynthesisUtterance !== 'undefined') {
+        const synthesis = window.speechSynthesis;
+        synthesis.cancel();
+        const det = detectLanguageAndScript(cleanText);
+        const hasUrduScript = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
+        const hasHindiScript = /[\u0900-\u097F]/.test(cleanText);
+        const isRomanUrdu = det.detected === 'roman_urdu' && det.confidence === 'high';
+        const lang = hasUrduScript || isRomanUrdu ? 'ur-PK' : hasHindiScript ? 'hi-IN' : 'en-US';
+        const utter = new SpeechSynthesisUtterance(cleanText);
+        utter.rate = 0.9;
+        utter.lang = lang;
+        const voices = synthesis.getVoices();
+        const languagePrefix = lang.toLowerCase().split('-')[0];
+        const matchingVoice = voices.find((voice) => voice.lang.toLowerCase() === lang.toLowerCase()) ||
+          voices.find((voice) => voice.lang.toLowerCase().startsWith(languagePrefix));
+        if (matchingVoice) utter.voice = matchingVoice;
+        utter.onend = () => setIsReciting(false);
+        utter.onerror = () => setIsReciting(false);
+        synthesis.speak(utter);
+        // Some WebViews fail silently when the speech service has no voice available.
+        window.setTimeout(() => {
+          if (synthesis.speaking || synthesis.pending) return;
+          setIsReciting(false);
+        }, 1500);
+      } else {
+        setIsReciting(false);
+      }
+    } catch {
       setIsReciting(false);
     }
   };
