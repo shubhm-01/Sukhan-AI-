@@ -29,8 +29,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Do not request the obsolete SDK package named "tools".
-          packages: 'platform-tools, platforms;android-35, build-tools;35.0.0'
+          # The action expects one SDK package per line, not a comma-separated list.
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
       - name: Accept Android SDK Licenses
         run: |
