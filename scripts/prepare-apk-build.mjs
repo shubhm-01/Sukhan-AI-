@@ -17,8 +17,8 @@ for (const lockFile of ['bun.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
 pkg.dependencies = {
-  '@capacitor-community/speech-recognition': '^7.0.0',
-  '@capacitor-community/text-to-speech': '^7.0.0',
+  '@capacitor-community/speech-recognition': '^7.0.1',
+  '@capacitor-community/text-to-speech': '^6.0.0',
   '@capacitor/android': '^7.0.0',
   '@capacitor/cli': '^7.0.0',
   '@capacitor/core': '^7.0.0',
