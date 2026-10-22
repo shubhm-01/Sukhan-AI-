@@ -84,7 +84,7 @@ async function searchDuckDuckGo(query: string): Promise<{ title: string; url: st
       const redirect = url.match(/uddg=([^&]+)/);
       if (redirect) { try { url = decodeURIComponent(redirect[1]); } catch { /* ignore malformed redirect */ } }
       if (!url.startsWith('http') || url.includes('duckduckgo.com')) continue;
-      const title = titleMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
+      const title = titleMatch.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
       if (title) results.push({ title, url, snippet: '' });
       if (results.length >= 5) break;
     }
