@@ -945,6 +945,10 @@ export default function App() {
           popup: true,
           prompt: 'Speak your message',
         });
+        setIsVoiceListening(false);
+        const activeListener = speechRecognitionRef.current;
+        speechRecognitionRef.current = null;
+        try { await activeListener?.remove?.(); } catch { /* listener already removed */ }
       } catch (error) {
         setIsVoiceListening(false);
         const message = error instanceof Error ? error.message : String(error || '');
