@@ -488,7 +488,7 @@ async function startServer() {
       const results = await searchDuckDuckGo(String(lastUserMsg));
       if (results.length) {
         finalGroundingSources = results.map((item) => ({ title: item.title, uri: item.url }));
-        finalReplyText = 'DuckDuckGo web results for your query:\\n\\n' + results.map((item, index) => (index + 1) + '. ' + item.title + '\\n' + item.url).join('\\n\\n');
+        finalReplyText = 'DuckDuckGo web results for your query:' + String.fromCharCode(10, 10) + results.map((item, index) => (index + 1) + '. ' + item.title + String.fromCharCode(10) + item.url).join(String.fromCharCode(10, 10));
         providerUsed = 'DuckDuckGo Web Search (free)';
       }
     }
