@@ -936,42 +936,6 @@ export default function App() {
     }
   };
 
-  const handleVoiceInput = () => {
-    if (isVoiceListening) {
-      try { speechRecognitionRef.current?.stop(); } catch { /* already stopped */ }
-      setIsVoiceListening(false);
-      return;
-    }
-    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!Recognition) {
-      setErrorBanner({ message: 'Voice typing is not available in this WebView. Update Android System WebView or use your keyboard microphone.' });
-      return;
-    }
-    try {
-      const recognition = new Recognition();
-      speechRecognitionRef.current = recognition;
-      recognition.lang = composerScript === 'urdu' || composerScript === 'roman_urdu' ? 'ur-PK' : composerScript === 'hindi' ? 'hi-IN' : 'en-IN';
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.onresult = (event: any) => {
-        let transcript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0]?.transcript || '';
-        if (transcript.trim()) setComposerText((current) => (current.trim() ? current.trimEnd() + ' ' : '') + transcript.trim());
-      };
-      recognition.onerror = (event: any) => {
-        setIsVoiceListening(false);
-        if (event?.error && event.error !== 'no-speech' && event.error !== 'aborted') setErrorBanner({ message: 'Voice input failed (' + event.error + '). Check microphone permission and your speech language pack.' });
-      };
-      recognition.onend = () => setIsVoiceListening(false);
-      recognition.start();
-      setIsVoiceListening(true);
-      setErrorBanner(null);
-    } catch {
-      setIsVoiceListening(false);
-      setErrorBanner({ message: 'Could not start voice input. Allow microphone access in Android app settings.' });
-    }
-  };
-
   const composerDetection = detectLanguageAndScript(composerText);
 
   // Only show poetry-refinement chips if the latest assistant message actually contains poetry
