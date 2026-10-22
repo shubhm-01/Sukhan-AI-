@@ -4,6 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
+import { Capacitor } from '@capacitor/core';
 import {
   Menu,
   Plus,
@@ -898,22 +900,71 @@ export default function App() {
     setTimeout(() => composerRef.current?.focus(), 50);
   };
 
-  const handleVoiceInput = () => {
+  const handleVoiceInput = async () => {
     if (isVoiceListening) {
-      try { speechRecognitionRef.current?.stop(); } catch { /* already stopped */ }
+      try {
+        if (Capacitor.isNativePlatform()) await SpeechRecognition.stop();
+        else speechRecognitionRef.current?.stop();
+      } catch { /* already stopped */ }
       setIsVoiceListening(false);
       return;
     }
+
+    setErrorBanner(null);
+    const language = composerScript === 'urdu' || composerScript === 'roman_urdu'
+      ? 'ur-PK'
+      : composerScript === 'hindi' ? 'hi-IN' : 'en-IN';
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const available = await SpeechRecognition.available();
+        if (!available.available) {
+          setErrorBanner({ message: 'Speech recognition is unavailable on this device. Install or enable a speech recognition service in Android settings.' });
+          return;
+        }
+        let permission = await SpeechRecognition.checkPermissions();
+        if (permission.speechRecognition !== 'granted') {
+          permission = await SpeechRecognition.requestPermissions();
+        }
+        if (permission.speechRecognition !== 'granted') {
+          setErrorBanner({ message: 'Microphone/speech permission was not granted. Allow microphone access in Android app settings, then try Voice again.' });
+          return;
+        }
+        const listener = await SpeechRecognition.addListener('partialResults', (event: { matches?: string[] }) => {
+          const transcript = event.matches?.[0]?.trim();
+          if (transcript) {
+            setComposerText((current) => (current.trim() ? current.trimEnd() + ' ' : '') + transcript);
+          }
+        });
+        speechRecognitionRef.current = { remove: () => listener.remove() };
+        setIsVoiceListening(true);
+        await SpeechRecognition.start({
+          language,
+          maxResults: 3,
+          partialResults: true,
+          popup: true,
+          prompt: 'Speak your message',
+        });
+      } catch (error) {
+        setIsVoiceListening(false);
+        const message = error instanceof Error ? error.message : String(error || '');
+        setErrorBanner({ message: /permission|denied|not.?allowed/i.test(message)
+          ? 'Android did not grant microphone/speech permission. Open Settings → Apps → Sukhan AI → Permissions and allow Microphone.'
+          : 'Voice input could not start. Check that a speech recognition service and the selected language are available on this device.' });
+      }
+      return;
+    }
+
     const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setErrorBanner({ message: 'Voice typing is not available in this WebView/browser. Update Android System WebView or use the keyboard microphone.' });
+      setErrorBanner({ message: 'Voice typing is not available in this browser. Use the keyboard microphone or install the Android app with native speech support.' });
       return;
     }
     try {
       const recognition = new SpeechRecognitionCtor();
       speechRecognitionRef.current = recognition;
-      recognition.lang = composerScript === 'urdu' ? 'ur-PK' : composerScript === 'hindi' ? 'hi-IN' : composerScript === 'roman_urdu' ? 'ur-PK' : 'en-IN';
-      recognition.continuous = true;
+      recognition.lang = language;
+      recognition.continuous = false;
       recognition.interimResults = false;
       recognition.onresult = (event: any) => {
         let transcript = '';
@@ -923,16 +974,15 @@ export default function App() {
       recognition.onerror = (event: any) => {
         setIsVoiceListening(false);
         if (event?.error && event.error !== 'no-speech' && event.error !== 'aborted') {
-          setErrorBanner({ message: 'Voice input failed (' + event.error + '). Check microphone permission and your device speech-language pack.' });
+          setErrorBanner({ message: 'Voice input failed (' + event.error + '). Check microphone permission and speech service settings.' });
         }
       };
       recognition.onend = () => setIsVoiceListening(false);
       recognition.start();
       setIsVoiceListening(true);
-      setErrorBanner(null);
     } catch {
       setIsVoiceListening(false);
-      setErrorBanner({ message: 'Could not start voice input. Please allow microphone access in Android app settings.' });
+      setErrorBanner({ message: 'Could not start voice input. Please allow microphone access and check your device speech service.' });
     }
   };
 
