@@ -1411,11 +1411,6 @@ export default function App() {
                     <span>{isVoiceListening ? 'Listening…' : 'Voice'}</span>
                   </button>
 
-                  <button type="button" onClick={handleVoiceInput} aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'} aria-pressed={isVoiceListening} className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isVoiceListening ? 'bg-rose-500/20 border-rose-400 text-rose-200' : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
-                    {isVoiceListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                    <span>{isVoiceListening ? 'Listening…' : 'Voice'}</span>
-                  </button>
-
                   {/* Poetic Craft Drawer Toggle */}
                   <button
                     type="button"
