@@ -180,8 +180,6 @@ export default function App() {
   const [composerText, setComposerText] = useState<string>('');
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const speechRecognitionRef = useRef<any>(null);
-  const [isVoiceListening, setIsVoiceListening] = useState(false);
-  const speechRecognitionRef = useRef<any>(null);
   const [composerScript, setComposerScript] = useState<PoetryLanguage>('auto');
   const [useWebResearch, setUseWebResearch] = useState<boolean>(false);
   const [craftForm, setCraftForm] = useState<PoetryForm>('ghazal');
@@ -916,7 +914,7 @@ export default function App() {
       speechRecognitionRef.current = recognition;
       recognition.lang = composerScript === 'urdu' ? 'ur-PK' : composerScript === 'hindi' ? 'hi-IN' : composerScript === 'roman_urdu' ? 'ur-PK' : 'en-IN';
       recognition.continuous = true;
-      recognition.interimResults = true;
+      recognition.interimResults = false;
       recognition.onresult = (event: any) => {
         let transcript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0]?.transcript || '';
