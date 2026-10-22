@@ -64,6 +64,36 @@ function writeServerDb(dbData: ServerDatabase): void {
   }
 }
 
+async function searchDuckDuckGo(query: string): Promise<{ title: string; url: string; snippet: string }[]> {
+  const q = query.trim().slice(0, 300);
+  if (!q) return [];
+  try {
+    const response = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SukhanAI/1.0)' },
+      signal: AbortSignal.timeout(6500),
+    });
+    if (!response.ok) return [];
+    const html = await response.text();
+    const results: { title: string; url: string; snippet: string }[] = [];
+    const chunks = html.split('result__a').slice(1);
+    for (const chunk of chunks) {
+      const hrefMatch = chunk.match(/href=["']([^"']+)["']/i);
+      const titleMatch = chunk.match(/^[^>]*>([\\s\\S]*?)<\\/a>/i);
+      if (!hrefMatch || !titleMatch) continue;
+      let url = hrefMatch[1].replace(/&amp;/g, '&');
+      const redirect = url.match(/uddg=([^&]+)/);
+      if (redirect) { try { url = decodeURIComponent(redirect[1]); } catch { /* ignore malformed redirect */ } }
+      if (!url.startsWith('http') || url.includes('duckduckgo.com')) continue;
+      const title = titleMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
+      if (title) results.push({ title, url, snippet: '' });
+      if (results.length >= 5) break;
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Request timed out')), ms);
@@ -337,6 +367,14 @@ async function startServer() {
     });
   });
 
+  app.get('/api/search', async (req, res) => {
+    const q = String(req.query.q || '').trim().slice(0, 300);
+    if (!q) { res.status(400).json({ error: 'A search query is required.' }); return; }
+    const results = await searchDuckDuckGo(q);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({ query: q, provider: 'DuckDuckGo', results, count: results.length });
+  });
+
   // ============================================================================
   // 1. PERSISTENT SERVER CHAT HISTORY API (User-isolated by ownerId)
   // ============================================================================
@@ -446,6 +484,14 @@ async function startServer() {
       }
     }
 
+    if (!finalReplyText && useWebResearch) {
+      const results = await searchDuckDuckGo(String(lastUserMsg));
+      if (results.length) {
+        finalGroundingSources = results.map((item) => ({ title: item.title, uri: item.url }));
+        finalReplyText = 'DuckDuckGo web results for your query:\\n\\n' + results.map((item, index) => (index + 1) + '. ' + item.title + '\\n' + item.url).join('\\n\\n');
+        providerUsed = 'DuckDuckGo Web Search (free)';
+      }
+    }
     if (!finalReplyText) {
       finalReplyText = buildContextualChatReply(rawMessages, settings);
     }
