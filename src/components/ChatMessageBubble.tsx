@@ -123,10 +123,26 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               };
               audio.onerror = () => {
                 audioRef.current = null;
-                setIsReciting(false);
+                if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                  const utterance = new SpeechSynthesisUtterance(cleanText);
+                  const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
+                  const hasHindi = /[\u0900-\u097F]/.test(cleanText);
+                  utterance.lang = hasUrdu ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
+                  utterance.rate = 0.9;
+                  utterance.onend = () => setIsReciting(false);
+                  utterance.onerror = () => setIsReciting(false);
+                  window.speechSynthesis.speak(utterance);
+                } else setIsReciting(false);
               };
               try {
                 await audio.play();
+                window.setTimeout(() => {
+                  if (audioRef.current === audio && audio.paused && !audio.ended) {
+                    audioRef.current = null;
+                    audio.onerror?.(new Event('error'));
+                  }
+                }, 1800);
                 return;
               } catch {
                 audioRef.current = null;
