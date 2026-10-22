@@ -78,7 +78,7 @@ async function searchDuckDuckGo(query: string): Promise<{ title: string; url: st
     const chunks = html.split('result__a').slice(1);
     for (const chunk of chunks) {
       const hrefMatch = chunk.match(/href=["']([^"']+)["']/i);
-      const titleMatch = chunk.match(/^[^>]*>([\\s\\S]*?)<\\/a>/i);
+      const titleMatch = chunk.split('</a>')[0]?.split('>').slice(1).join('>');
       if (!hrefMatch || !titleMatch) continue;
       let url = hrefMatch[1].replace(/&amp;/g, '&');
       const redirect = url.match(/uddg=([^&]+)/);
