@@ -21,6 +21,8 @@ import {
   Feather,
   BookOpen,
   Square,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
@@ -176,6 +178,8 @@ export default function App() {
 
   // Composer State
   const [composerText, setComposerText] = useState<string>('');
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const speechRecognitionRef = useRef<any>(null);
   const [composerScript, setComposerScript] = useState<PoetryLanguage>('auto');
   const [useWebResearch, setUseWebResearch] = useState<boolean>(false);
   const [craftForm, setCraftForm] = useState<PoetryForm>('ghazal');
@@ -894,6 +898,44 @@ export default function App() {
     setTimeout(() => composerRef.current?.focus(), 50);
   };
 
+  const handleVoiceInput = () => {
+    if (isVoiceListening) {
+      try { speechRecognitionRef.current?.stop(); } catch { /* already stopped */ }
+      setIsVoiceListening(false);
+      return;
+    }
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setErrorBanner({ message: 'Voice typing is not available in this WebView/browser. Update Android System WebView or use the keyboard microphone.' });
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognitionCtor();
+      speechRecognitionRef.current = recognition;
+      recognition.lang = composerScript === 'urdu' ? 'ur-PK' : composerScript === 'hindi' ? 'hi-IN' : composerScript === 'roman_urdu' ? 'ur-PK' : 'en-IN';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0]?.transcript || '';
+        if (transcript.trim()) setComposerText((current) => (current.trim() ? current.trimEnd() + ' ' : '') + transcript.trim());
+      };
+      recognition.onerror = (event: any) => {
+        setIsVoiceListening(false);
+        if (event?.error && event.error !== 'no-speech' && event.error !== 'aborted') {
+          setErrorBanner({ message: 'Voice input failed (' + event.error + '). Check microphone permission and your device speech-language pack.' });
+        }
+      };
+      recognition.onend = () => setIsVoiceListening(false);
+      recognition.start();
+      setIsVoiceListening(true);
+      setErrorBanner(null);
+    } catch {
+      setIsVoiceListening(false);
+      setErrorBanner({ message: 'Could not start voice input. Please allow microphone access in Android app settings.' });
+    }
+  };
+
   const composerDetection = detectLanguageAndScript(composerText);
 
   // Only show poetry-refinement chips if the latest assistant message actually contains poetry
@@ -1321,6 +1363,17 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={handleVoiceInput}
+                    aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
+                    aria-pressed={isVoiceListening}
+                    className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isVoiceListening ? 'bg-rose-500/20 border-rose-400 text-rose-200' : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                  >
+                    {isVoiceListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                    <span>{isVoiceListening ? 'Listening…' : 'Voice'}</span>
+                  </button>
 
                   {/* Poetic Craft Drawer Toggle */}
                   <button
