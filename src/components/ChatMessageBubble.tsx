@@ -164,8 +164,8 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
       // If server-generated audio is unavailable, try the device's native TTS before browser synthesis.
       if (Capacitor.isNativePlatform()) {
         try {
-          const hasUrdu = /[\\u0600-\\u06FF\\u0750-\\u077F\\uFB50-\\uFDFF\\uFE70-\\uFEFF]/.test(cleanText);
-          const hasHindi = /[\\u0900-\\u097F]/.test(cleanText);
+          const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
+          const hasHindi = /[\u0900-\u097F]/.test(cleanText);
           const det = detectLanguageAndScript(cleanText);
           const lang = hasUrdu || (det.detected === 'roman_urdu' && det.confidence === 'high')
             ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
