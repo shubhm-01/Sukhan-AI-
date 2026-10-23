@@ -8,6 +8,7 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
+  reload,
   signOut as fbSignOut,
   onAuthStateChanged,
   User,
@@ -156,6 +157,13 @@ export async function resendVerificationEmail(): Promise<void> {
   if (!currentUser) throw new Error('Please sign in again to resend the verification email.');
   if (currentUser.emailVerified) return;
   await sendEmailVerification(currentUser);
+}
+
+export async function refreshSignedInUser(): Promise<User> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Please sign in again to continue.');
+  await reload(currentUser);
+  return currentUser;
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
