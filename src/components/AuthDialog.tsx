@@ -4,6 +4,7 @@ import {
   auth,
   createEmailAccount,
   requestPasswordReset,
+  refreshSignedInUser,
   resendVerificationEmail,
   signInWithEmail,
   signInWithGoogle,
@@ -214,7 +215,19 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ onClose, onAuthenticated
           {notice && <div role="status" className="rounded-lg border border-[var(--accent-gold)]/30 bg-[var(--accent-gold)]/10 px-3 py-2.5 text-xs leading-5 text-[var(--text-primary)]">{notice}</div>}
 
           {notice && !error && mode !== 'reset' && auth.currentUser && !auth.currentUser.emailVerified && (
-            <button type="button" disabled={busy} onClick={() => runAction(async () => { await resendVerificationEmail(); setNotice('A fresh verification link has been sent. Check your inbox and spam folder.'); })} className="w-full rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--accent-gold)] disabled:opacity-50">Resend verification email</button>
+            <div className="space-y-2">
+              <button type="button" disabled={busy} onClick={() => runAction(async () => {
+                const refreshedUser = await refreshSignedInUser();
+                if (refreshedUser.emailVerified) {
+                  setNotice('Email verified successfully. You are signed in.');
+                  onAuthenticated();
+                  onClose();
+                } else {
+                  setNotice('Verification is not confirmed yet. Open the link from your email, then try again.');
+                }
+              })} className="w-full rounded-lg border border-[var(--accent-gold)]/50 px-3 py-2 text-xs font-semibold text-[var(--accent-gold)] hover:border-[var(--accent-gold)] disabled:opacity-50">I’ve verified my email</button>
+              <button type="button" disabled={busy} onClick={() => runAction(async () => { await resendVerificationEmail(); setNotice('A fresh verification link has been sent. Check your inbox and spam folder.'); })} className="w-full rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--accent-gold)] disabled:opacity-50">Resend verification email</button>
+            </div>
           )}
 
           <button type="submit" disabled={busy} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent-gold)] px-4 py-3 text-sm font-bold text-[var(--accent-fg)] transition hover:bg-[var(--accent-gold-hover)] disabled:cursor-wait disabled:opacity-60">
