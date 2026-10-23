@@ -1111,7 +1111,7 @@ export default function App() {
         </header>
 
         {/* Scrollable Message Stream */}
-        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 sm:px-6 py-4 sm:py-6">
           <div className="max-w-3xl mx-auto space-y-6">
             {!activeChat || activeChat.messages.length === 0 ? (
               /* Empty State / Literary Welcome Screen */
@@ -1233,7 +1233,7 @@ export default function App() {
         </main>
 
         {/* Bottom ChatGPT-Style Composer Dock */}
-        <footer className="px-3 sm:px-6 pb-3 sm:pb-4 pt-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] shrink-0">
+        <footer className="px-2.5 sm:px-6 pb-2.5 sm:pb-4 pt-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] shrink-0">
           <div className="max-w-3xl mx-auto space-y-2.5">
             {/* Contextual Follow-Up Quick Chips ONLY when latest response contains a poem */}
             {showPoetryFollowUpChips && (
@@ -1357,7 +1357,7 @@ export default function App() {
                 e.preventDefault();
                 handleSendMessage();
               }}
-              className="rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] focus-within:border-[var(--accent-gold)] transition-colors p-2.5 sm:p-3 space-y-2"
+              className="rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] focus-within:border-[var(--accent-gold)] focus-within:shadow-[0_0_0_1px_var(--accent-gold)] transition-colors p-2 sm:p-3 space-y-2"
             >
               <textarea
                 ref={composerRef}
@@ -1378,7 +1378,7 @@ export default function App() {
                   }
                 }}
                 placeholder="Message Sukhan AI... Chat normally about anything, or ask for a ghazal / shayari when you want one"
-                className={`w-full resize-none bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-sm sm:text-[15px] leading-relaxed ${
+                className={`w-full min-h-12 resize-none bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-base sm:text-[15px] leading-relaxed ${
                   composerDetection.detected === 'urdu'
                     ? 'font-urdu text-lg text-right'
                     : ''
