@@ -55,7 +55,6 @@ import {
   db,
   auth,
   onAuthStateChanged,
-  signInWithGoogle,
   signOutUser,
   collection,
   doc,
