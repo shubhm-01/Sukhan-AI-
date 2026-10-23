@@ -181,14 +181,17 @@ jobs:
       - name: Prepare installable Sukhan-AI.apk
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk ./Sukhan-AI.apk
+          # APK files are ZIP containers; verify the archive before publishing it.
+          unzip -t ./Sukhan-AI.apk
+          test -s ./Sukhan-AI.apk
+          sha256sum ./Sukhan-AI.apk
           ls -lh ./Sukhan-AI.apk
 
       - name: Upload Sukhan-AI APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Sukhan-AI-Android-APK
-          path: |
-            ./Sukhan-AI.apk
-            android/app/build/outputs/apk/debug/app-debug.apk
+          # Publish one clearly named APK, not two duplicate copies in the artifact ZIP.
+          path: ./Sukhan-AI.apk
           if-no-files-found: error
           retention-days: 30
