@@ -105,22 +105,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     setIsReciting(true);
     setRecitationError('');
     try {
-      // Use Android's native TextToSpeech engine in the APK; browser speech synthesis
-      // is inconsistent across Android WebView versions and installed voice packs.
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
-          const hasHindi = /[\u0900-\u097F]/.test(cleanText);
-          const det = detectLanguageAndScript(cleanText);
-          const lang = hasUrdu || (det.detected === 'roman_urdu' && det.confidence === 'high')
-            ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
-          await TextToSpeech.speak({ text: cleanText, lang, rate: 0.9, pitch: 1.0, volume: 1.0, category: 'playback', queueStrategy: 0 });
-          setIsReciting(false);
-          return;
-        } catch {
-          // Fall through to server audio or browser TTS.
-        }
-      }
       // Prefer server-generated recitation when a configured backend is available.
       if (hasBackendApiAvailable()) {
         try {
@@ -174,6 +158,22 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           }
         } catch {
           // Network, timeout, or unsupported audio: try device speech synthesis.
+        }
+      }
+
+      // If server-generated audio is unavailable, try the device's native TTS before browser synthesis.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
+          const hasHindi = /[\u0900-\u097F]/.test(cleanText);
+          const det = detectLanguageAndScript(cleanText);
+          const lang = hasUrdu || (det.detected === 'roman_urdu' && det.confidence === 'high')
+            ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
+          await TextToSpeech.speak({ text: cleanText, lang, rate: 0.82, pitch: 1.0, volume: 1.0, category: 'playback', queueStrategy: 0 });
+          setIsReciting(false);
+          return;
+        } catch {
+          // Continue to browser speech synthesis as a final fallback.
         }
       }
 
