@@ -105,3 +105,54 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+
+/* Responsive comfort and touch ergonomics */
+button,
+a,
+input,
+textarea,
+select {
+  touch-action: manipulation;
+}
+
+#sukhan-chat-input,
+#sukhan-prompt-input {
+  scroll-margin-block: 1rem;
+}
+
+@media (max-width: 640px) {
+  #sukhan-chat-input,
+  #sukhan-prompt-input {
+    font-size: 16px;
+  }
+
+  #sukhan-chat-input {
+    min-height: 3rem;
+    max-height: 10rem;
+  }
+
+  .font-urdu {
+    line-height: 2.05;
+  }
+
+  .diwan-page-shadow {
+    box-shadow: 0 12px 28px -14px rgba(0, 0, 0, 0.4);
+  }
+
+  ::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
