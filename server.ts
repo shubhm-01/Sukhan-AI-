@@ -680,7 +680,7 @@ async function startServer() {
             responseModalities: ['AUDIO'],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Charon' },
+                prebuiltVoiceConfig: { voiceName: 'Aoede' },
               },
             },
           },
