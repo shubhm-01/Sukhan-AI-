@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Mail, LockKeyhole, UserRound, LoaderCircle, Chrome, ArrowLeft } from 'lucide-react';
 import {
+  auth,
   createEmailAccount,
   requestPasswordReset,
   resendVerificationEmail,
