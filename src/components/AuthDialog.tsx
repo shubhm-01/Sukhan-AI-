@@ -41,6 +41,8 @@ function getAuthErrorMessage(error: unknown): string {
       return 'This app domain is not enabled for Firebase Authentication. Add the current domain in Firebase Console → Authentication → Settings → Authorized domains.';
     case 'auth/operation-not-allowed':
       return 'This sign-in method is disabled in Firebase. Enable it under Authentication → Sign-in method.';
+    case 'auth/operation-not-supported-in-this-environment':
+      return 'Google sign-in is not supported in this app environment yet. Use email and password for now; native Android Google OAuth needs native Firebase configuration.';
     case 'auth/invalid-api-key':
       return 'Firebase configuration is invalid. The app administrator needs to check the Firebase web API key.';
     default:
@@ -104,11 +106,15 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ onClose, onAuthenticated
         : await signInWithEmail(email, password);
 
       if (!user.emailVerified) {
-        try {
-          await resendVerificationEmail();
-          setNotice('Your account is signed in, but email verification is still pending. We sent a verification link—open it, then return here.');
-        } catch {
-          setNotice('Your account is signed in, but email verification is still pending. Use the resend button below or check your inbox.');
+        if (mode === 'signup') {
+          setNotice('Your account has been created. We sent a verification link—open it, then return here. Check your spam folder if it is missing.');
+        } else {
+          try {
+            await resendVerificationEmail();
+            setNotice('Email verification is still pending. We sent a fresh verification link—open it, then return here.');
+          } catch {
+            setNotice('Email verification is still pending. Use the resend button below or check your inbox.');
+          }
         }
         return;
       }
