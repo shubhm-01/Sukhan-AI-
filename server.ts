@@ -671,7 +671,7 @@ async function startServer() {
               role: 'user',
               parts: [
                 {
-                  text: `Recite this poetry with warm, measured Mushaira cadence:\n\n${text}`,
+                  text: `Read this text aloud as a natural, expressive South Asian poetry recitation. Preserve the exact original language and script; do not translate, summarize, or add words. Use clear Urdu/Hindustani pronunciation, gentle warmth, measured Mushaira cadence, and a short pause between couplets or lines. Avoid a robotic, rushed, or overly theatrical delivery.\n\n${text}`,
                 },
               ],
             },
