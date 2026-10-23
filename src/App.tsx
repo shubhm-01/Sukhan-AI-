@@ -27,6 +27,7 @@ import {
   MicOff,
 } from 'lucide-react';
 import { ChatSidebar } from './components/ChatSidebar';
+import { AuthDialog } from './components/AuthDialog';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
 import { FarhangView } from './components/FarhangView';
 import {
@@ -54,7 +55,6 @@ import {
   db,
   auth,
   onAuthStateChanged,
-  signInWithGoogle,
   signOutUser,
   collection,
   doc,
@@ -175,6 +175,7 @@ export default function App() {
   const [filterSavedOnly, setFilterSavedOnly] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isAuthDialogOpen, setIsAuthDialogOpen] = useState<boolean>(false);
   const [isFarhangOpen, setIsFarhangOpen] = useState<boolean>(false);
   const [isCraftDrawerOpen, setIsCraftDrawerOpen] = useState<boolean>(false);
 
@@ -1028,14 +1029,20 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenFarhangModal={() => setIsFarhangOpen(true)}
         user={user}
-        onSignIn={async () => {
+        onSignIn={() => {
+          setIsAuthDialogOpen(true);
+          setIsMobileSidebarOpen(false);
+        }}
+        onSignOut={async () => {
           try {
-            await signInWithGoogle();
-          } catch {
-            // Popup closed by user
+            await signOutUser();
+            setErrorBanner(null);
+          } catch (err) {
+            setErrorBanner({
+              message: err instanceof Error ? err.message : 'Could not sign out. Please try again.',
+            });
           }
         }}
-        onSignOut={signOutUser}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
@@ -1647,6 +1654,13 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {isAuthDialogOpen && (
+        <AuthDialog
+          onClose={() => setIsAuthDialogOpen(false)}
+          onAuthenticated={() => setErrorBanner(null)}
+        />
       )}
 
       {/* Farhang Poetic Lexicon Modal */}

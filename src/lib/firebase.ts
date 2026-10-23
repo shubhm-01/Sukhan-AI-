@@ -3,6 +3,12 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  updateProfile,
+  reload,
   signOut as fbSignOut,
   onAuthStateChanged,
   User,
@@ -125,6 +131,43 @@ export async function signInWithGoogle(): Promise<User | null> {
   const provider = new GoogleAuthProvider();
   const result = await signInWithPopup(auth, provider);
   return result.user;
+}
+
+export async function signInWithEmail(email: string, password: string): Promise<User> {
+  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return result.user;
+}
+
+export async function createEmailAccount(
+  name: string,
+  email: string,
+  password: string
+): Promise<User> {
+  const result = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  const displayName = name.trim();
+  if (displayName) {
+    await updateProfile(result.user, { displayName });
+  }
+  await sendEmailVerification(result.user);
+  return result.user;
+}
+
+export async function resendVerificationEmail(): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Please sign in again to resend the verification email.');
+  if (currentUser.emailVerified) return;
+  await sendEmailVerification(currentUser);
+}
+
+export async function refreshSignedInUser(): Promise<User> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Please sign in again to continue.');
+  await reload(currentUser);
+  return currentUser;
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 export async function signOutUser(): Promise<void> {
