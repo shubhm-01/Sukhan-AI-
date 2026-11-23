@@ -70,7 +70,7 @@ create index if not exists poem_embeddings_user_idx
   on public.poem_embeddings (user_id);
 create index if not exists poem_embeddings_vector_hnsw_idx
   on public.poem_embeddings
-  using hnsw (embedding vector_cosine_ops);
+  using hnsw (embedding extensions.vector_cosine_ops);
 
 alter table public.chats enable row level security;
 alter table public.messages enable row level security;
