@@ -9,11 +9,12 @@
     "allowNavigation": [
       "*.run.app",
       "*.googleapis.com",
-      "*.firebaseio.com",
-      "*.firebaseapp.com",
       "text.pollinations.ai",
       "*.livekit.cloud",
-      "*.livekit.io"
+      "*.livekit.io",
+      "*.supabase.co",
+      "*.hf.space",
+      "huggingface.co"
     ]
   },
   "android": {
