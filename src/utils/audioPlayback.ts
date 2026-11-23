@@ -21,7 +21,7 @@ export function getPlaybackSnapshot() { return current; }
 export function subscribePlayback(listener: (snapshot: PlaybackSnapshot) => void) {
   subscribers.add(listener);
   listener(current);
-  return () => subscribers.delete(listener);
+  return () => { subscribers.delete(listener); };
 }
 
 function fingerprint(value: string) {

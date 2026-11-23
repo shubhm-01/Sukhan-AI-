@@ -10,7 +10,7 @@ import {
   Menu,
   Plus,
   Send,
-  AudioLines,
+  Waves,
   Sparkles,
   Bookmark,
   Globe,
@@ -1223,7 +1223,7 @@ export default function App() {
                 {isVoiceListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </button>
               <button type="button" onClick={() => setIsLiveVoiceOpen(true)} aria-label="Start live voice conversation" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-gold)] transition-transform hover:scale-105 active:scale-95">
-                <AudioLines className="h-4 w-4" />
+                <Waves className="h-4 w-4" />
               </button>
               {isStreaming ? (
                 <button type="button" onClick={handleStopGenerating} aria-label="Stop generating" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-500/15 text-rose-400"><Square className="h-3.5 w-3.5" /></button>
@@ -1233,6 +1233,7 @@ export default function App() {
             </form>
           </div>
         </footer>
+      </div>
 
       {/* Settings Modal */}
       {isSettingsOpen && (

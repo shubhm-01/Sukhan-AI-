@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Room, RoomEvent, Track } from 'livekit-client';
-import { AudioLines, LoaderCircle, Mic, MicOff, PhoneOff, X } from 'lucide-react';
+import { Waves, Loader2, Mic, MicOff, PhoneOff, X } from 'lucide-react';
 import { gsap } from 'gsap';
 import { auth } from '../lib/firebase';
 import { resolveApiUrl } from '../utils/apiClient';
@@ -170,7 +170,7 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({ onClose, languag
               <span className="sr-only">End call</span>
             </button>
             <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white/75">
-              {state === 'connecting' ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <AudioLines className="h-5 w-5" />}
+              {state === 'connecting' ? <Loader2 className="h-5 w-5 animate-spin" /> : <Waves className="h-5 w-5" />}
             </div>
           </div>
           <div ref={audioMountRef} className="sr-only" />

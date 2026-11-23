@@ -12,7 +12,7 @@ import {
   ThumbsDown,
   Volume2,
   Pause,
-  LoaderCircle,
+  Loader2,
   Bookmark,
   Share2,
   ExternalLink,
@@ -456,7 +456,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             aria-label={playback.id === message.id && playback.status === 'playing' ? 'Pause recitation' : 'Read poem aloud'}
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-gold)] hover:text-[var(--accent-gold)]"
           >
-            {playback.id === message.id && playback.status === 'loading' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : playback.id === message.id && playback.status === 'playing' ? <Pause className="h-3.5 w-3.5" /> : playback.id === message.id && playback.status === 'paused' ? <Volume2 className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            {playback.id === message.id && playback.status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : playback.id === message.id && playback.status === 'playing' ? <Pause className="h-3.5 w-3.5" /> : playback.id === message.id && playback.status === 'paused' ? <Volume2 className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
             <span>{playback.id === message.id && playback.status === 'loading' ? 'Preparing voice…' : playback.id === message.id && playback.status === 'playing' ? 'Pause' : playback.id === message.id && playback.status === 'paused' ? 'Resume' : 'Listen'}</span>
             {playback.id === message.id && playback.status === 'playing' && <span className="sukhan-wave ml-1 flex h-3 items-center gap-0.5" aria-hidden="true">{Array.from({length:5},(_,i)=><span key={i} style={{height:`${5+(i%3)*3}px`}} />)}</span>}
           </button>
