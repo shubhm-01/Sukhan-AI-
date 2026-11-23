@@ -51,6 +51,14 @@ export function isNativeApkEnvironment(
  * - Always true on Web (where Express serves the app on the same origin)
  * - True on Android APK only when VITE_API_BASE_URL is configured to an http(s) URL
  */
+function getStoredApiBaseUrl(): string {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage.getItem('sukhan_api_base_url') || '' : '';
+  } catch {
+    return '';
+  }
+}
+
 export function hasBackendApiAvailable(
   envBaseUrl?: string,
   loc?: { protocol?: string; hostname?: string; port?: string },
@@ -61,9 +69,7 @@ export function hasBackendApiAvailable(
       ? envBaseUrl
       : typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL
       ? String(import.meta.env.VITE_API_BASE_URL || '')
-      : typeof window !== 'undefined'
-      ? window.localStorage.getItem('sukhan_api_base_url') || ''
-      : '';
+      : getStoredApiBaseUrl();
 
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
   if (isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
