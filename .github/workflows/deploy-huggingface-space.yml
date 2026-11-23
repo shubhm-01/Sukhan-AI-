@@ -1,0 +1,53 @@
+name: Deploy backend to Hugging Face Space
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Upload Docker backend source to Hugging Face
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployment branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/premium-mobile-live-voice
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Hugging Face Hub client
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Upload repository to the Docker Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::Add HF_TOKEN as a GitHub Actions repository secret first."
+            exit 1
+          fi
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.upload_folder(
+              repo_id="hfexplorer2634/sukhan-ai-backend",
+              repo_type="space",
+              folder_path=".",
+              commit_message="Deploy Sukhan AI combined Node + LiveKit backend",
+              ignore_patterns=[
+                  ".git/**", ".github/**", ".data/**", "node_modules/**",
+                  "dist/**", "android/**", "*.apk", "*.aab",
+                  ".env", ".env.*", "**/.env", "**/.env.*",
+                  "**/*service-account*.json", "**/*credentials*.json",
+              ],
+          )
+          print("Source uploaded. Hugging Face Space build has been triggered.")
+          PY
