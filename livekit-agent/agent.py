@@ -154,9 +154,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         language = "ur"
 
     session = AgentSession(
-        stt=groq.STT(model=os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")),
+        stt=groq.STT(
+            model=os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo"),
+            detect_language=True,
+        ),
         llm=groq.LLM(model=os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")),
         vad=silero.VAD.load(),
+        turn_handling={
+            # Use the local Silero VAD both for turn completion and for barge-in.
+            "turn_detection": "vad",
+            "interruption": {
+                "enabled": True,
+                "mode": "vad",
+                "min_duration": 0.25,
+                "resume_false_interruption": True,
+            },
+        },
     )
     await session.start(room=ctx.room, agent=SukhanAgent(requested_voice, language))
     await session.generate_reply(
