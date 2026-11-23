@@ -71,7 +71,11 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({ onClose, languag
         if (sessionError) throw sessionError;
         const accessToken = session?.access_token;
         if (!accessToken) throw new Error('Sign in from the left drawer before starting Live Voice.');
-        const response = await fetch(resolveApiUrl('/api/livekit/token'), {
+        const tokenUrl = resolveApiUrl('/api/livekit/token');
+        if (tokenUrl.startsWith('/')) {
+          throw new Error('Set the HTTPS API Base URL in Sukhan AI Settings before starting Live Voice.');
+        }
+        const response = await fetch(tokenUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
