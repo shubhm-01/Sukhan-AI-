@@ -212,7 +212,7 @@ export default function App() {
     }
   }, [activeChatId]);
 
-  // Chat history is stored locally for guests and in authenticated Firestore for signed-in users.
+  // Offline-first local history for guests; signed-in accounts sync through Supabase Postgres.
   // The old public /api/chats endpoint trusted a caller-supplied ownerId; the UI no longer uses it.
   const syncChatsToServer = useCallback(async (updatedChats: ChatThread[]) => {
     try {
@@ -283,7 +283,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [authReady, user?.id]);
 
-  const persistChatToFirestore = async (chat: ChatThread) => {
+  const persistChatToCloudSafe = async (chat: ChatThread) => {
     if (!authReady || !user) return;
     try {
       await persistChatToCloud(user.id, chat);
@@ -294,7 +294,7 @@ export default function App() {
     }
   };
 
-  const persistMessageToFirestore = async (chatId: string, msg: ChatMessageItem) => {
+  const persistMessageToCloudSafe = async (chatId: string, msg: ChatMessageItem) => {
     if (!authReady || !user || !msg.content?.trim()) return;
     try {
       await persistMessageToCloud(user.id, chatId, msg);
@@ -407,7 +407,7 @@ export default function App() {
                 : c
             )
           );
-          await persistMessageToFirestore(targetChatId, finalMsg);
+          await persistMessageToCloudSafe(targetChatId, finalMsg);
         },
       });
     } catch (err) {
@@ -474,7 +474,7 @@ export default function App() {
       };
       setChats((prev) => [targetChat!, ...prev]);
       setActiveChatId(newChatId);
-      await persistChatToFirestore(targetChat);
+      await persistChatToCloudSafe(targetChat);
     }
 
     const userMsg: ChatMessageItem = {
@@ -524,7 +524,7 @@ export default function App() {
     );
 
     setTimeout(scrollToBottom, 50);
-    await persistMessageToFirestore(targetChat.id, userMsg);
+    await persistMessageToCloudSafe(targetChat.id, userMsg);
 
     await streamAssistantReply(targetChat.id, updatedHistory, assistantMsgId);
   };
@@ -551,7 +551,7 @@ export default function App() {
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     setComposerText('');
-    await persistChatToFirestore(newChat);
+    await persistChatToCloudSafe(newChat);
     setTimeout(() => composerRef.current?.focus(), 60);
   };
 
