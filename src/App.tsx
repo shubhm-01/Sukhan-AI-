@@ -58,6 +58,7 @@ import {
   persistChatToCloud,
   persistMessageToCloud,
   syncLocalDataToCloud,
+  syncSavedPoemsToCloud,
   updateChatInCloud,
   updateMessageInCloud,
 } from './lib/cloudSync';
@@ -137,7 +138,7 @@ export default function App() {
     }
   }, [settings]);
 
-  // Firebase Auth User
+  // Supabase authenticated user
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authReady, setAuthReady] = useState<boolean>(false);
 
@@ -281,6 +282,20 @@ export default function App() {
 
     void syncAfterSignIn();
     return () => { cancelled = true; };
+  }, [authReady, user?.id]);
+
+  // Keep saved poem additions/removals in sync after the initial sign-in merge.
+  useEffect(() => {
+    if (!authReady || !user) return;
+    const syncSavedPoems = () => {
+      void syncSavedPoemsToCloud(user.id).catch((err) => {
+        setErrorBanner({
+          message: `Could not sync Saved Shayari. It is still available on this device. ${err instanceof Error ? err.message : ''}`,
+        });
+      });
+    };
+    window.addEventListener('sukhan-saved-verses-changed', syncSavedPoems);
+    return () => window.removeEventListener('sukhan-saved-verses-changed', syncSavedPoems);
   }, [authReady, user?.id]);
 
   const persistChatToCloudSafe = async (chat: ChatThread) => {
