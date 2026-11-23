@@ -45,6 +45,10 @@ export const SavedPoemsModal: React.FC<SavedPoemsModalProps> = ({ onClose }) => 
     setPoems(next);
     try {
       localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(next));
+      const deleted = JSON.parse(localStorage.getItem('sukhan_saved_verse_deletions_v1') || '[]');
+      const pending = Array.isArray(deleted) ? deleted.filter((value): value is string => typeof value === 'string') : [];
+      if (!pending.includes(id)) pending.push(id);
+      localStorage.setItem('sukhan_saved_verse_deletions_v1', JSON.stringify(pending));
       window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
     } catch {
       // Keep the modal usable even if device storage is full.
