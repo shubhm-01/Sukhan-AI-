@@ -18,7 +18,7 @@ import {
   Cloud,
 } from 'lucide-react';
 import { ChatThread } from '../utils/poetryLogic';
-import { User } from '../lib/firebase';
+import type { SupabaseUser } from '../lib/supabase';
 
 interface ChatSidebarProps {
   chats: ChatThread[];
@@ -37,7 +37,7 @@ interface ChatSidebarProps {
   onOpenSettings: () => void;
   onOpenFarhangModal: () => void;
   onOpenSavedPoems: () => void;
-  user: User | null;
+  user: SupabaseUser | null;
   onSignIn: () => void;
   onSignOut: () => void;
   isMobileOpen: boolean;
@@ -370,7 +370,7 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
           <div className="flex items-center gap-1.5 min-w-0 text-[var(--text-muted)]">
             <Cloud className="w-3.5 h-3.5 text-[var(--accent-gold)] shrink-0" />
             <span className="truncate">
-              {user ? user.displayName || user.email : 'Synced to Local DB'}
+              {user ? user.user_metadata?.full_name || user.email : 'Synced to Local DB'}
             </span>
           </div>
 
