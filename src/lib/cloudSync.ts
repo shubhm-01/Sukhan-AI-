@@ -29,6 +29,15 @@ function readPendingSavedPoemDeletes(): string[] {
   }
 }
 
+function readPendingChatDeletes(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('sukhan_chat_deletions_v1') || '[]');
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function asIso(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || !value) return fallback;
   const date = new Date(value);
@@ -143,6 +152,18 @@ export async function syncSavedPoemsToCloud(userId: string): Promise<void> {
 
 export async function syncLocalDataToCloud(userId: string, localChats: ChatThread[]): Promise<ChatThread[]> {
   if (!supabase) return localChats;
+
+  const pendingChatDeletes = readPendingChatDeletes();
+  if (pendingChatDeletes.length) {
+    const { error: deleteError } = await supabase.from('chats')
+      .delete().eq('user_id', userId).in('id', pendingChatDeletes);
+    if (deleteError) throw deleteError;
+    try {
+      localStorage.removeItem('sukhan_chat_deletions_v1');
+    } catch {
+      // Repeating an idempotent delete on the next sync is safe.
+    }
+  }
 
   if (localChats.length) {
     const now = new Date().toISOString();
