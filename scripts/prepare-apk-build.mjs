@@ -17,6 +17,12 @@ for (const lockFile of ['bun.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
 pkg.dependencies = {
+  '@radix-ui/react-dialog': '^1.1.15',
+  'gsap': '^3.13.0',
+  'html-to-image': '^1.11.13',
+  'livekit-client': '^2.20.1',
+  'livekit-server-sdk': '^2.20.1',
+  'firebase-admin': '^13.0.0',
   '@capacitor-community/speech-recognition': '^7.0.1',
   '@capacitor-community/text-to-speech': '^6.0.0',
   '@capacitor/android': '^7.0.0',

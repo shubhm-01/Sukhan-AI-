@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
-import { TextToSpeech } from '@capacitor-community/text-to-speech';
+import { toPng } from 'html-to-image';
+import { gsap } from 'gsap';
+import { toggleMessagePlayback, subscribePlayback, PlaybackSnapshot } from '../utils/audioPlayback';
 import {
   Copy,
   Check,
@@ -10,7 +11,10 @@ import {
   ThumbsUp,
   ThumbsDown,
   Volume2,
-  Square,
+  Pause,
+  LoaderCircle,
+  Bookmark,
+  Share2,
   ExternalLink,
   Feather,
 } from 'lucide-react';
@@ -20,7 +24,6 @@ import {
   segmentMessageContent,
   detectLanguageAndScript,
 } from '../utils/poetryLogic';
-import { resolveApiUrl, hasBackendApiAvailable } from '../utils/apiClient';
 
 interface ChatMessageBubbleProps {
   message: ChatMessageItem;
@@ -29,6 +32,7 @@ interface ChatMessageBubbleProps {
   onRegenerate: (messageId: string) => void;
   onContinue: (messageId: string) => void;
   onFeedback: (messageId: string, feedback: MessageFeedback) => void;
+  voice: string;
 }
 
 export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
@@ -38,29 +42,49 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   onRegenerate,
   onContinue,
   onFeedback,
+  voice,
 }) => {
   const [copied, setCopied] = useState(false);
   const [copiedBlockIdx, setCopiedBlockIdx] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
-  const [isReciting, setIsReciting] = useState(false);
+  const [playback, setPlayback] = useState<PlaybackSnapshot>({ id: null, status: 'idle' });
   const [recitationError, setRecitationError] = useState('');
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const articleRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setEditValue(message.content);
   }, [message.content]);
 
+  useEffect(() => subscribePlayback(setPlayback), []);
+
+  // Reveal couplet lines with transform-only GSAP motion; never animate for reduced-motion users.
   useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
+    if (message.isStreaming) return;
+    const media = gsap.matchMedia();
+    media.add('(prefers-reduced-motion: no-preference)', () => {
+      const lines = articleRef.current?.querySelectorAll<HTMLElement>('[data-poetry-line]');
+      if (!lines?.length) return;
+      const tween = gsap.fromTo(
+        lines,
+        { y: 10, autoAlpha: 0 },
+        { y: 0, autoAlpha: 1, duration: 0.42, stagger: 0.075, ease: 'power2.out', overwrite: 'auto' }
+      );
+      return () => tween.kill();
+    });
+    return () => media.revert();
+  }, [message.id, message.isStreaming]);
+
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sukhan_saved_verses_v1') || '[]');
+      setIsSaved(Array.isArray(saved) && saved.some((item) => item.id === message.id));
+    } catch {
+      setIsSaved(false);
+    }
+  }, [message.id]);
 
   const copyToClipboard = async (text: string, blockIdx?: number) => {
     const cleanText = text.replace(/\[\/?VERSE\]/gi, '').trim();
@@ -83,132 +107,51 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     }
   };
 
-  const handleReciteText = async (textToRecite: string) => {
-    const cleanText = textToRecite.replace(/\[\/?VERSE\]/gi, '').trim();
-    if (!cleanText) return;
+  const handleReadAloud = () => {
+    void toggleMessagePlayback(message.id, message.content, voice);
+  };
 
-    if (isReciting) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
+  const handleSaveVerse = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('sukhan_saved_verses_v1') || '[]');
+      const saved = Array.isArray(raw) ? raw : [];
+      if (!saved.some((item) => item.id === message.id)) {
+        saved.unshift({
+          id: message.id,
+          chatId: message.chatId,
+          content: message.content.replace(/\\[\\/?VERSE\\]/gi, '').trim(),
+          createdAt: new Date().toISOString(),
+        });
       }
-      if (Capacitor.isNativePlatform()) {
-        try { await TextToSpeech.stop(); } catch { /* no native speech active */ }
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      setIsReciting(false);
+      localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(saved.slice(0, 250)));
+      setIsSaved(true);
+    } catch {
+      setRecitationError('Could not save this poem on this device.');
+    }
+  };
+
+  const handleShareAsImage = async () => {
+    const card = articleRef.current?.querySelector<HTMLElement>('[data-testid="chat-poetry-card"]');
+    if (!card) {
+      setRecitationError('This reply does not contain a formatted poem card to share yet.');
       return;
     }
-
-    setIsReciting(true);
-    setRecitationError('');
     try {
-      // Use Android's native TextToSpeech engine in the APK; browser speech synthesis
-      // is inconsistent across Android WebView versions and installed voice packs.
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
-          const hasHindi = /[\u0900-\u097F]/.test(cleanText);
-          const det = detectLanguageAndScript(cleanText);
-          const lang = hasUrdu || (det.detected === 'roman_urdu' && det.confidence === 'high')
-            ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
-          await TextToSpeech.speak({ text: cleanText, lang, rate: 0.9, pitch: 1.0, volume: 1.0, category: 'playback', queueStrategy: 0 });
-          setIsReciting(false);
-          return;
-        } catch {
-          // Fall through to server audio or browser TTS.
-        }
-      }
-      // Prefer server-generated recitation when a configured backend is available.
-      if (hasBackendApiAvailable()) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = window.setTimeout(() => controller.abort(), 12000);
-          const res = await fetch(resolveApiUrl('/api/poetry/recite'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: cleanText }),
-            signal: controller.signal,
-          }).finally(() => window.clearTimeout(timeoutId));
-          const ct = res.headers.get('content-type') || '';
-          if (res.ok && ct.includes('application/json')) {
-            const data = await res.json();
-            if (typeof data.audioBase64 === 'string' && data.audioBase64.length > 0) {
-              const audio = new Audio(
-                `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`
-              );
-              audioRef.current = audio;
-              audio.onended = () => {
-                audioRef.current = null;
-                setIsReciting(false);
-              };
-              audio.onerror = () => {
-                audioRef.current = null;
-                if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                  window.speechSynthesis.cancel();
-                  const utterance = new SpeechSynthesisUtterance(cleanText);
-                  const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
-                  const hasHindi = /[\u0900-\u097F]/.test(cleanText);
-                  utterance.lang = hasUrdu ? 'ur-PK' : hasHindi ? 'hi-IN' : 'en-IN';
-                  utterance.rate = 0.9;
-                  utterance.onend = () => setIsReciting(false);
-                  utterance.onerror = () => setIsReciting(false);
-                  window.speechSynthesis.speak(utterance);
-                } else setIsReciting(false);
-              };
-              try {
-                await audio.play();
-                window.setTimeout(() => {
-                  if (audioRef.current === audio && audio.paused && !audio.ended) {
-                    audioRef.current = null;
-                    audio.onerror?.(new Event('error'));
-                  }
-                }, 1800);
-                return;
-              } catch {
-                audioRef.current = null;
-              }
-            }
-          }
-        } catch {
-          // Network, timeout, or unsupported audio: try device speech synthesis.
-        }
-      }
-
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window &&
-          typeof SpeechSynthesisUtterance !== 'undefined') {
-        const synthesis = window.speechSynthesis;
-        synthesis.cancel();
-        const det = detectLanguageAndScript(cleanText);
-        const hasUrduScript = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleanText);
-        const hasHindiScript = /[\u0900-\u097F]/.test(cleanText);
-        const isRomanUrdu = det.detected === 'roman_urdu' && det.confidence === 'high';
-        const lang = hasUrduScript || isRomanUrdu ? 'ur-PK' : hasHindiScript ? 'hi-IN' : 'en-US';
-        const utter = new SpeechSynthesisUtterance(cleanText);
-        utter.rate = 0.9;
-        utter.lang = lang;
-        const voices = synthesis.getVoices();
-        const languagePrefix = lang.toLowerCase().split('-')[0];
-        const matchingVoice = voices.find((voice) => voice.lang.toLowerCase() === lang.toLowerCase()) ||
-          voices.find((voice) => voice.lang.toLowerCase().startsWith(languagePrefix));
-        if (matchingVoice) utter.voice = matchingVoice;
-        utter.onend = () => setIsReciting(false);
-        utter.onerror = () => setIsReciting(false);
-        synthesis.speak(utter);
-        // Some WebViews fail silently when the speech service has no voice available.
-        window.setTimeout(() => {
-          if (synthesis.speaking || synthesis.pending) return;
-          setIsReciting(false);
-        }, 1500);
+      const dataUrl = await toPng(card, { cacheBust: true, pixelRatio: 2 });
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const file = new File([blob], 'sukhan-ai-poem.png', { type: 'image/png' });
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share({ files: [file], title: 'Sukhan AI Shayari' });
       } else {
-        setRecitationError('Speech playback is not supported on this device.');
-        setIsReciting(false);
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = 'sukhan-ai-poem.png';
+        link.click();
       }
-    } catch {
-      setRecitationError('Could not play audio. Check that your device has a text-to-speech voice installed.');
-      setIsReciting(false);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setRecitationError('Could not create the share card. Try again on this device.');
     }
   };
 
@@ -347,6 +290,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
 
   return (
     <article
+      ref={articleRef}
       aria-label="Sukhan AI Response"
       className="flex items-start gap-3 sm:gap-4"
     >
@@ -395,15 +339,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                             <span>Copy Verse</span>
                           </>
                         )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleReciteText(seg.text)}
-                        className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--accent-gold)] transition-colors cursor-pointer"
-                      >
-                        <Volume2 className="w-3 h-3" />
-                        <span>Recite</span>
                       </button>
                     </div>
                   </div>
@@ -510,105 +445,38 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           </div>
         )}
 
-        {recitationError && <p role="status" className="text-xs text-rose-400" onClick={() => setRecitationError('')}>{recitationError} · tap to dismiss</p>}
+        {playback.id === message.id && playback.status === 'error' && <p role="status" className="text-xs text-rose-400">{playback.error}</p>}
+        {recitationError && <p role="status" className="text-xs text-rose-400">{recitationError}</p>}
 
-        {/* Message Actions Bar: Copy, Regenerate, Continue, Recite, Feedback */}
-        <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+        {/* Structured poem actions: one global speaker state prevents overlapping playback. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-muted)]">
           <button
             type="button"
-            onClick={() => copyToClipboard(message.content)}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+            onClick={handleReadAloud}
+            aria-label={playback.id === message.id && playback.status === 'playing' ? 'Pause recitation' : 'Read poem aloud'}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-gold)] hover:text-[var(--accent-gold)]"
           >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy</span>
-              </>
-            )}
+            {playback.id === message.id && playback.status === 'loading' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : playback.id === message.id && playback.status === 'playing' ? <Pause className="h-3.5 w-3.5" /> : playback.id === message.id && playback.status === 'paused' ? <Volume2 className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            <span>{playback.id === message.id && playback.status === 'loading' ? 'Preparing voice…' : playback.id === message.id && playback.status === 'playing' ? 'Pause' : playback.id === message.id && playback.status === 'paused' ? 'Resume' : 'Listen'}</span>
+            {playback.id === message.id && playback.status === 'playing' && <span className="sukhan-wave ml-1 flex h-3 items-center gap-0.5" aria-hidden="true">{Array.from({length:5},(_,i)=><span key={i} style={{height:`${5+(i%3)*3}px`}} />)}</span>}
           </button>
-
-          <button
-            type="button"
-            onClick={() => onRegenerate(message.id)}
-            disabled={isStreaming}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Regenerate</span>
+          <button type="button" onClick={() => copyToClipboard(message.content)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]">
+            {copied ? <Check className="h-3.5 w-3.5 text-[var(--accent-gold)]" /> : <Copy className="h-3.5 w-3.5" />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => onContinue(message.id)}
-            disabled={isStreaming}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <ArrowRight className="w-3.5 h-3.5" />
-            <span>Continue</span>
+          <button type="button" onClick={handleSaveVerse} aria-pressed={isSaved} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-[var(--bg-surface)] hover:text-[var(--accent-gold)]">
+            <Bookmark className={`h-3.5 w-3.5 ${isSaved ? 'fill-[var(--accent-gold)] text-[var(--accent-gold)]' : ''}`} />
+            <span>{isSaved ? 'Saved' : 'Save'}</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => handleReciteText(message.content)}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-          >
-            {isReciting ? (
-              <>
-                <Square className="w-3.5 h-3.5 text-rose-400" />
-                <span>Stop</span>
-              </>
-            ) : (
-              <>
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>Listen</span>
-              </>
-            )}
+          <button type="button" onClick={() => void handleShareAsImage()} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-[var(--bg-surface)] hover:text-[var(--accent-gold)]">
+            <Share2 className="h-3.5 w-3.5" />
+            <span>Share card</span>
           </button>
-
           <span aria-hidden="true" className="mx-0.5">·</span>
-
-          <button
-            type="button"
-            onClick={() =>
-              onFeedback(
-                message.id,
-                message.feedback === 'up' ? 'none' : 'up'
-              )
-            }
-            aria-label="Helpful response"
-            aria-pressed={message.feedback === 'up'}
-            className={`p-1 rounded transition-colors cursor-pointer ${
-              message.feedback === 'up'
-                ? 'text-[var(--accent-gold)] bg-[var(--bg-surface)]'
-                : 'hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <ThumbsUp className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              onFeedback(
-                message.id,
-                message.feedback === 'down' ? 'none' : 'down'
-              )
-            }
-            aria-label="Unhelpful response"
-            aria-pressed={message.feedback === 'down'}
-            className={`p-1 rounded transition-colors cursor-pointer ${
-              message.feedback === 'down'
-                ? 'text-rose-400 bg-[var(--bg-surface)]'
-                : 'hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <ThumbsDown className="w-3.5 h-3.5" />
-          </button>
+          <button type="button" onClick={() => onRegenerate(message.id)} disabled={isStreaming} aria-label="Regenerate response" className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-40"><RefreshCw className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => onContinue(message.id)} disabled={isStreaming} aria-label="Continue response" className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-40"><ArrowRight className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => onFeedback(message.id, message.feedback === 'up' ? 'none' : 'up')} aria-label="Helpful response" aria-pressed={message.feedback === 'up'} className={`rounded-lg p-2 transition-colors ${message.feedback === 'up' ? 'text-[var(--accent-gold)]' : 'hover:text-[var(--text-primary)]'}`}><ThumbsUp className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => onFeedback(message.id, message.feedback === 'down' ? 'none' : 'down')} aria-label="Unhelpful response" aria-pressed={message.feedback === 'down'} className={`rounded-lg p-2 transition-colors ${message.feedback === 'down' ? 'text-rose-400' : 'hover:text-[var(--text-primary)]'}`}><ThumbsDown className="h-3.5 w-3.5" /></button>
         </div>
       </div>
     </article>

@@ -139,11 +139,13 @@ export interface ChatThread {
 }
 
 export interface UserSettings {
-  theme: 'dark' | 'light';
+  theme: 'dark' | 'light' | 'warm';
   defaultScript: PoetryLanguage;
   poeticStyle: WritingStyle;
   showTranslations: boolean;
   enableWebGrounding: boolean;
+  voice: string;
+  apiBaseUrl?: string;
 }
 
 export interface MessageSegment {

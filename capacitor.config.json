@@ -11,7 +11,9 @@
       "*.googleapis.com",
       "*.firebaseio.com",
       "*.firebaseapp.com",
-      "text.pollinations.ai"
+      "text.pollinations.ai",
+      "*.livekit.cloud",
+      "*.livekit.io"
     ]
   },
   "android": {

@@ -3,6 +3,11 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
+import { applicationDefault, cert, getApps as getAdminApps, initializeApp as initializeAdminApp } from 'firebase-admin/app';
+import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
@@ -363,6 +368,7 @@ async function startServer() {
       ok: true,
       service: 'sukhan-ai-api',
       aiConfigured,
+      liveVoiceConfigured: Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET),
       timestamp: new Date().toISOString(),
     });
   });
@@ -375,30 +381,187 @@ async function startServer() {
     res.json({ query: q, provider: 'DuckDuckGo', results, count: results.length });
   });
 
-  // ============================================================================
-  // 1. PERSISTENT SERVER CHAT HISTORY API (User-isolated by ownerId)
-  // ============================================================================
-  app.get('/api/chats', (req, res) => {
-    const ownerId = String(req.query.ownerId || 'guest').trim() || 'guest';
-    const dbData = readServerDb();
-    if (!dbData.chatsByOwner[ownerId]) {
-      dbData.chatsByOwner[ownerId] = ownerId === 'guest' ? INITIAL_SEED_CHATS : [];
-      writeServerDb(dbData);
-    }
-    res.json({ chats: dbData.chatsByOwner[ownerId] });
+  // Legacy unauthenticated ownerId-based endpoints are retired.
+  // Guests use localStorage; signed-in users use the existing owner-checked Firestore rules.
+  app.get('/api/chats', (_req, res) => {
+    res.status(410).json({ error: 'This legacy endpoint is retired. Use local chat storage or authenticated Firestore sync.' });
+  });
+  app.post('/api/chats/sync', (_req, res) => {
+    res.status(410).json({ error: 'This legacy endpoint is retired. Use authenticated Firestore sync.' });
   });
 
-  app.post('/api/chats/sync', (req, res) => {
-    const ownerId = String(req.body?.ownerId || 'guest').trim() || 'guest';
-    const chats = req.body?.chats;
-    if (!Array.isArray(chats)) {
-      res.status(400).json({ error: 'chats array is required' });
+  // In-memory per-process rate limit. Use an API gateway for shared limits at scale.
+  const requestLimits = new Map<string, { windowStart: number; count: number }>();
+  function allowRequest(key: string, limit: number, windowMs: number): boolean {
+    const now = Date.now();
+    const previous = requestLimits.get(key);
+    if (!previous || now - previous.windowStart >= windowMs) {
+      requestLimits.set(key, { windowStart: now, count: 1 });
+      return true;
+    }
+    if (previous.count >= limit) return false;
+    previous.count += 1;
+    return true;
+  }
+
+  let adminAuth: ReturnType<typeof getFirebaseAdminAuth> | null = null;
+  function getAdminAuthService() {
+    if (adminAuth) return adminAuth;
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'storied-hawk-tn50x';
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+    const credential = serviceAccountJson
+      ? cert(JSON.parse(serviceAccountJson))
+      : applicationDefault();
+    const existing = getAdminApps().find((item) => item.name === 'sukhan-api');
+    const adminApp = existing || initializeAdminApp({ credential, projectId }, 'sukhan-api');
+    adminAuth = getFirebaseAdminAuth(adminApp);
+    return adminAuth;
+  }
+
+  const ALLOWED_EDGE_VOICES = new Set([
+    'ur-PK-UzmaNeural', 'ur-PK-AsadNeural', 'ur-IN-GulNeural', 'ur-IN-SalmanNeural',
+    'hi-IN-SwaraNeural', 'hi-IN-MadhurNeural',
+    'en-IN-NeerjaNeural', 'en-IN-PrabhatNeural',
+  ]);
+
+  app.post('/api/livekit/token', async (req, res) => {
+    const ip = String(req.ip || req.socket.remoteAddress || 'unknown');
+    if (!allowRequest(`livekit-ip:${ip}`, 20, 60_000)) {
+      res.status(429).json({ error: 'Too many live voice connection attempts. Try again in a minute.' });
       return;
     }
-    const dbData = readServerDb();
-    dbData.chatsByOwner[ownerId] = chats;
-    writeServerDb(dbData);
-    res.json({ ok: true, count: chats.length });
+
+    const authorization = String(req.headers.authorization || '');
+    const idToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    if (!idToken) {
+      res.status(401).json({ error: 'Sign in is required to start a live voice session.' });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await getAdminAuthService().verifyIdToken(idToken);
+    } catch {
+      res.status(401).json({ error: 'Your sign-in session could not be verified. Sign in again and retry.' });
+      return;
+    }
+    if (decodedToken.email_verified !== true) {
+      res.status(403).json({ error: 'Verify your account email before starting Live Voice.' });
+      return;
+    }
+    if (!allowRequest(`livekit-user:${decodedToken.uid}`, 8, 60_000)) {
+      res.status(429).json({ error: 'You have started too many live sessions. Please wait a minute.' });
+      return;
+    }
+
+    const liveKitUrl = process.env.LIVEKIT_URL?.trim() || '';
+    const liveKitKey = process.env.LIVEKIT_API_KEY?.trim() || '';
+    const liveKitSecret = process.env.LIVEKIT_API_SECRET?.trim() || '';
+    if (!liveKitUrl || !liveKitKey || !liveKitSecret) {
+      res.status(503).json({ error: 'LiveKit is not configured on the backend yet. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.' });
+      return;
+    }
+
+    const agentName = process.env.LIVEKIT_AGENT_NAME?.trim() || 'sukhan-live';
+    const requestedLanguage = String(req.body?.language || 'auto').toLowerCase();
+    const language = requestedLanguage.startsWith('hi') ? 'hi'
+      : requestedLanguage.startsWith('en') ? 'en' : 'ur';
+    const requestedVoice = String(req.body?.voice || 'auto');
+    const voice = requestedVoice === 'auto' || ALLOWED_EDGE_VOICES.has(requestedVoice)
+      ? requestedVoice : 'auto';
+    const roomName = `sukhan-${decodedToken.uid.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+    const identity = `listener-${decodedToken.uid.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+
+    try {
+      const apiHost = liveKitUrl.replace(/^wss:\/\//i, 'https://').replace(/^ws:\/\//i, 'http://');
+      const liveKitApi = new LiveKitAPI({ host: apiHost, apiKey: liveKitKey, secret: liveKitSecret });
+      await liveKitApi.agentDispatch.createDispatch(roomName, agentName, {
+        metadata: JSON.stringify({ voice, language }),
+      });
+
+      const accessToken = new AccessToken(liveKitKey, liveKitSecret, {
+        identity,
+        name: decodedToken.name || 'Sukhan AI Listener',
+        ttl: '10m',
+      });
+      accessToken.addGrant({
+        roomJoin: true,
+        room: roomName,
+        canPublish: true,
+        canSubscribe: true,
+        canPublishData: true,
+      });
+      const token = await accessToken.toJwt();
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ serverUrl: liveKitUrl, token, roomName });
+    } catch (error) {
+      console.error('[Sukhan LiveKit] Token/dispatch failed:', error);
+      res.status(503).json({ error: 'Could not start the live voice agent. Check that the LiveKit project and sukhan-live worker are running.' });
+    }
+  });
+
+  app.post('/api/poetry/recite', async (req, res) => {
+    const ip = String(req.ip || req.socket.remoteAddress || 'unknown');
+    if (!allowRequest(`recite:${ip}`, 18, 60_000)) {
+      res.status(429).json({ error: 'Too many read-aloud requests. Please wait a minute.' });
+      return;
+    }
+    const text = String(req.body?.text || '').trim();
+    if (!text || text.length > 6000) {
+      res.status(400).json({ error: 'Poem text must contain between 1 and 6,000 characters.' });
+      return;
+    }
+    const requestedVoice = String(req.body?.voice || 'ur-PK-UzmaNeural');
+    const voice = requestedVoice === 'auto' || ALLOWED_EDGE_VOICES.has(requestedVoice)
+      ? requestedVoice : 'ur-PK-UzmaNeural';
+
+    const child = spawn('python3', [path.join(__dirname, 'scripts', 'edge-tts.py')], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+    });
+    const audioChunks: Buffer[] = [];
+    let totalBytes = 0;
+    let errorText = '';
+    let timedOut = false;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 25_000);
+    child.stdout.on('data', (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > 24 * 1024 * 1024) {
+        child.kill('SIGKILL');
+        return;
+      }
+      audioChunks.push(Buffer.from(chunk));
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      errorText = (errorText + chunk.toString()).slice(-4000);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'The server neural voice service could not start.', detail: error.message });
+      }
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (res.headersSent || res.writableEnded) return;
+      const audio = Buffer.concat(audioChunks);
+      if (timedOut) {
+        res.status(504).json({ error: 'Voice generation timed out. Try a shorter poem.' });
+      } else if (code !== 0 || !audio.length) {
+        console.warn('[Sukhan Edge TTS]', errorText);
+        res.status(503).json({ error: 'Neural voice generation failed. The online speech service may be unavailable.' });
+      } else {
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(200).send(audio);
+      }
+    });
+    req.on('aborted', () => child.kill('SIGKILL'));
+    child.stdin.end(JSON.stringify({ text, voice }));
   });
 
   // ============================================================================
@@ -646,96 +809,7 @@ async function startServer() {
     res.json({ suggestions: defaultSuggestions });
   });
 
-  app.post('/api/poetry/recite', async (req, res) => {
-    const text = String(req.body?.text || '').trim();
-    if (!text) {
-      res.status(400).json({ error: 'No poem text provided for recitation.' });
-      return;
-    }
 
-    const ai = getGenAIClient();
-    if (!ai) {
-      res.status(503).json({
-        error: 'Server audio recitation unavailable; using browser voice synthesis.',
-        useBrowserFallback: true,
-      });
-      return;
-    }
-
-    try {
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: `Recite this poetry with warm, measured Mushaira cadence:\n\n${text}`,
-                },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Charon' },
-              },
-            },
-          },
-        }),
-        10000
-      );
-
-      const audioPart = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-      const base64Audio = audioPart?.data;
-      if (base64Audio) {
-        // Gemini TTS commonly returns raw 16-bit little-endian PCM (24 kHz mono),
-        // not a WAV container. Wrap PCM bytes in a WAV header before sending it
-        // to HTMLAudioElement; labelling raw PCM as audio/wav makes playback fail.
-        const sourceMimeType = String(audioPart?.mimeType || '').toLowerCase();
-        const pcm = Buffer.from(base64Audio, 'base64');
-        if (sourceMimeType.includes('audio/l16') || sourceMimeType.includes('pcm')) {
-          const sampleRateMatch = sourceMimeType.match(/rate=(\\d+)/);
-          const sampleRate = sampleRateMatch ? Number(sampleRateMatch[1]) : 24000;
-          const channelsMatch = sourceMimeType.match(/channels=(\\d+)/);
-          const channels = channelsMatch ? Number(channelsMatch[1]) : 1;
-          const bitsPerSample = 16;
-          const blockAlign = channels * bitsPerSample / 8;
-          const wav = Buffer.alloc(44 + pcm.length);
-          wav.write('RIFF', 0);
-          wav.writeUInt32LE(36 + pcm.length, 4);
-          wav.write('WAVE', 8);
-          wav.write('fmt ', 12);
-          wav.writeUInt32LE(16, 16);
-          wav.writeUInt16LE(1, 20);
-          wav.writeUInt16LE(channels, 22);
-          wav.writeUInt32LE(sampleRate, 24);
-          wav.writeUInt32LE(sampleRate * blockAlign, 28);
-          wav.writeUInt16LE(blockAlign, 32);
-          wav.writeUInt16LE(bitsPerSample, 34);
-          wav.write('data', 36);
-          wav.writeUInt32LE(pcm.length, 40);
-          pcm.copy(wav, 44);
-          res.json({ audioBase64: wav.toString('base64'), mimeType: 'audio/wav' });
-        } else {
-          // Preserve formats that already carry their own container.
-          res.json({ audioBase64: base64Audio, mimeType: sourceMimeType || 'audio/wav' });
-        }
-        return;
-      }
-      res.status(503).json({
-        error: 'Audio stream empty; falling back to local recitation.',
-        useBrowserFallback: true,
-      });
-    } catch {
-      res.status(503).json({
-        error: 'Audio model busy; falling back to local recitation.',
-        useBrowserFallback: true,
-      });
-    }
-  });
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

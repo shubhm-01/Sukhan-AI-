@@ -34,6 +34,22 @@
     --border-strong: rgba(154, 107, 31, 0.4);
   }
 
+  [data-theme="warm"] {
+    --bg-canvas: #F2EBDD;
+    --bg-sidebar: #E7DCC8;
+    --bg-surface: #FAF5EA;
+    --bg-elevated: #EDE2CF;
+    --bg-verse: #F8F0E2;
+    --text-primary: #30271F;
+    --text-secondary: #66594B;
+    --text-muted: #897A69;
+    --accent-gold: #936B32;
+    --accent-gold-hover: #775326;
+    --accent-fg: #FFFDF8;
+    --border-subtle: rgba(105, 78, 43, 0.18);
+    --border-strong: rgba(105, 78, 43, 0.34);
+  }
+
   body, button, input, select, textarea {
     font-family: 'Plus Jakarta Sans', 'Noto Naskh Arabic', 'Noto Serif Devanagari', -apple-system, BlinkMacSystemFont, sans-serif;
   }
@@ -105,3 +121,16 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+
+.sukhan-orb {
+  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.9), rgba(255,255,255,.08) 16%, transparent 24%), radial-gradient(circle at 50% 45%, #e4c48b 0%, #936b43 35%, #3d2948 68%, #130d18 100%);
+  box-shadow: 0 0 70px rgba(212,175,106,.28), inset 0 0 36px rgba(255,255,255,.2);
+  animation: sukhan-orb-breathe 4s ease-in-out infinite;
+}
+@keyframes sukhan-orb-breathe { 0%,100% { transform: scale(.96); } 50% { transform: scale(1.04); } }
+.sukhan-wave span { display:block; width:3px; border-radius:99px; background:var(--accent-gold); transform-origin:center; animation:sukhan-wave 900ms ease-in-out infinite; }
+.sukhan-wave span:nth-child(2n) { animation-delay:120ms; }
+.sukhan-wave span:nth-child(3n) { animation-delay:240ms; }
+@keyframes sukhan-wave { 0%,100% { transform:scaleY(.35); opacity:.55; } 50% { transform:scaleY(1); opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .sukhan-orb,.sukhan-wave span { animation:none !important; } }

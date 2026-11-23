@@ -10,6 +10,7 @@ import {
   Menu,
   Plus,
   Send,
+  AudioLines,
   Sparkles,
   Bookmark,
   Globe,
@@ -29,6 +30,7 @@ import {
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
 import { FarhangView } from './components/FarhangView';
+import { LiveVoiceModal } from './components/LiveVoiceModal';
 import {
   ChatThread,
   ChatMessageItem,
@@ -80,6 +82,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   poeticStyle: 'classical',
   showTranslations: true,
   enableWebGrounding: false,
+  voice: 'auto',
 };
 
 const STARTER_PROMPTS = [
@@ -137,6 +140,7 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', settings.theme);
     try {
       localStorage.setItem(STORAGE_SETTINGS_KEY, JSON.stringify(settings));
+      localStorage.setItem('sukhan_api_base_url', settings.apiBaseUrl?.trim() || '');
     } catch {
       // Ignore storage error
     }
@@ -175,6 +179,8 @@ export default function App() {
   const [filterSavedOnly, setFilterSavedOnly] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
+  const closeLiveVoice = useCallback(() => setIsLiveVoiceOpen(false), []);
   const [isFarhangOpen, setIsFarhangOpen] = useState<boolean>(false);
   const [isCraftDrawerOpen, setIsCraftDrawerOpen] = useState<boolean>(false);
 
@@ -213,58 +219,19 @@ export default function App() {
     }
   }, [activeChatId]);
 
-  // Persist chats to localStorage and sync to backend persistent DB
-  const syncChatsToServer = useCallback(
-    async (updatedChats: ChatThread[], ownerId: string) => {
-      try {
-        localStorage.setItem(STORAGE_CHATS_KEY, JSON.stringify(updatedChats));
-      } catch {
-        // Ignore quota errors
-      }
-      if (!hasBackendApiAvailable()) return;
-      try {
-        await fetch(resolveApiUrl('/api/chats/sync'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ownerId, chats: updatedChats }),
-        });
-      } catch {
-        // Ignore offline errors
-      }
-    },
-    []
-  );
+  // Chat history is stored locally for guests and in authenticated Firestore for signed-in users.
+  // The old public /api/chats endpoint trusted a caller-supplied ownerId; the UI no longer uses it.
+  const syncChatsToServer = useCallback(async (updatedChats: ChatThread[]) => {
+    try {
+      localStorage.setItem(STORAGE_CHATS_KEY, JSON.stringify(updatedChats));
+    } catch {
+      // Ignore storage quota errors; current in-memory chat state remains usable.
+    }
+  }, []);
 
-  // Initial load from server persistent store if localStorage wasn't populated
   useEffect(() => {
-    if (!hasBackendApiAvailable()) return;
-    let cancelled = false;
-    const ownerKey = user?.uid || 'guest';
-    fetch(resolveApiUrl(`/api/chats?ownerId=${encodeURIComponent(ownerKey)}`))
-      .then((res) => {
-        const ct = res.headers.get('content-type') || '';
-        return res.ok && ct.includes('application/json') ? res.json() : null;
-      })
-      .then((data) => {
-        if (cancelled || !data || !Array.isArray(data.chats)) return;
-        const hasLocal = localStorage.getItem(STORAGE_CHATS_KEY);
-        if (!hasLocal && data.chats.length > 0) {
-          setChats(data.chats);
-        }
-      })
-      .catch(() => {
-        // Local state already initialized
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.uid]);
-
-  // Sync changes whenever `chats` updates
-  useEffect(() => {
-    const ownerKey = user?.uid || 'guest';
-    syncChatsToServer(chats, ownerKey);
-  }, [chats, user?.uid, syncChatsToServer]);
+    syncChatsToServer(chats);
+  }, [chats, syncChatsToServer]);
 
   // Firebase Auth listener & Firestore User-Isolated Sync
   useEffect(() => {
@@ -1043,127 +1010,88 @@ export default function App() {
       {/* Central Workspace Column */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Top Conversation Header */}
-        <header className="min-h-14 px-3 sm:px-6 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/90 backdrop-blur-md flex items-center justify-between gap-3 shrink-0 z-20">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <button
-              type="button"
-              onClick={() => setIsMobileSidebarOpen(true)}
-              aria-label="Open conversation sidebar"
-              className="lg:hidden p-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-primary)] cursor-pointer shrink-0"
-            >
-              <Menu className="w-4 h-4" />
-            </button>
+        <header className="relative z-20 flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/90 px-3 py-2 backdrop-blur-xl sm:px-6">
+          <button
+            type="button"
+            onClick={() => setIsMobileSidebarOpen(true)}
+            aria-label="Open chat and saved poetry drawer"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors hover:border-[var(--accent-gold)] lg:hidden"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
 
-            <div className="min-w-0">
-              <h1 className="font-display text-lg sm:text-xl font-semibold text-[var(--text-primary)] truncate">
-                {activeChat?.title || 'Sukhan AI'}
-              </h1>
+          <div className="absolute left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+            <h1 className="font-display text-xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-2xl">Sukhan AI</h1>
+            <div className="flex items-center gap-1.5">
+              <select
+                aria-label="Quick language selection"
+                value={composerScript}
+                onChange={(event) => setComposerScript(event.target.value as PoetryLanguage)}
+                className="max-w-[108px] rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 py-1 text-[10px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-gold)]"
+              >
+                <option value="auto">Auto language</option>
+                <option value="roman_urdu">Roman Urdu</option>
+                <option value="urdu">Urdu · اردو</option>
+                <option value="hindi">Hindi · हिन्दी</option>
+              </select>
+              <select
+                aria-label="Quick poetry form selection"
+                value={craftForm}
+                onChange={(event) => setCraftForm(event.target.value as PoetryForm)}
+                className="max-w-[92px] rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 py-1 text-[10px] text-[var(--text-secondary)] outline-none focus:border-[var(--accent-gold)]"
+              >
+                <option value="ghazal">Ghazal</option>
+                <option value="shayari">Shayari</option>
+                <option value="nazm">Nazm</option>
+                <option value="qita">Qita</option>
+                <option value="caption">Caption</option>
+              </select>
             </div>
           </div>
 
-          {/* Right Header Controls */}
-          <div className="flex items-center gap-2 shrink-0">
-            {activeChat && (
-              <button
-                type="button"
-                onClick={() => handleToggleSaveChat(activeChat.id)}
-                aria-label={
-                  activeChat.saved
-                    ? 'Remove conversation from saved'
-                    : 'Bookmark conversation'
-                }
-                className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  activeChat.saved
-                    ? 'bg-[var(--bg-elevated)] border-[var(--accent-gold)] text-[var(--accent-gold)]'
-                    : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <Bookmark
-                  className={`w-3.5 h-3.5 ${
-                    activeChat.saved ? 'fill-[var(--accent-gold)]' : ''
-                  }`}
-                />
-                <span className="hidden sm:inline">
-                  {activeChat.saved ? 'Saved' : 'Save Chat'}
-                </span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setIsFarhangOpen(true)}
-              aria-label="Open Farhang Poetic Lexicon"
-              className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <BookOpen className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
-              <span className="hidden md:inline">Farhang</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleNewChat}
-              className="px-3 py-1.5 rounded-lg bg-[var(--accent-gold)] hover:bg-[var(--accent-gold-hover)] text-[var(--accent-fg)] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Chat</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            aria-label="Start new chat"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-gold)] text-[var(--accent-fg)] shadow-sm transition-transform hover:scale-105 active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         </header>
 
         {/* Scrollable Message Stream */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
           <div className="max-w-3xl mx-auto space-y-6">
             {!activeChat || activeChat.messages.length === 0 ? (
-              /* Empty State / Literary Welcome Screen */
-              <div className="py-8 sm:py-12 space-y-8 text-center">
-                <div className="space-y-3 max-w-xl mx-auto">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center mx-auto">
-                    <Feather className="w-6 h-6 text-[var(--accent-gold)]" />
-                  </div>
-                  <h2 className="font-display text-3xl sm:text-4xl font-semibold text-[var(--text-primary)]">
-                    How can Sukhan AI help you today?
-                  </h2>
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                    Chat naturally about anything, ask questions, or request{' '}
-                    <span className="text-[var(--text-primary)] font-medium">
-                      Urdu Ghazals (اردو)
-                    </span>
-                    ,{' '}
-                    <span className="text-[var(--text-primary)] font-medium">
-                      Roman Urdu Shayari
-                    </span>
-                    , and{' '}
-                    <span className="text-[var(--text-primary)] font-medium">
-                      Hindi Kavita (हिन्दी)
-                    </span>{' '}
-                    whenever you want to compose poetry.
-                  </p>
+              /* Minimal welcome screen with quick poetic starters */
+              <div className="mx-auto flex max-w-xl flex-col items-center gap-6 py-10 text-center sm:py-16">
+                <div className="grid h-14 w-14 place-items-center rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)]">
+                  <Feather className="h-7 w-7 text-[var(--accent-gold)]" />
                 </div>
-
-                {/* Starter Prompt Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left max-w-2xl mx-auto">
-                  {STARTER_PROMPTS.map((item, idx) => (
+                <div className="space-y-2">
+                  <h2 className="font-display text-3xl font-semibold text-[var(--text-primary)] sm:text-4xl">A thought becomes a verse.</h2>
+                  <p className="text-sm leading-6 text-[var(--text-secondary)]">Talk naturally, explore literature, or ask Sukhan to write in the language and form you love.</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {[
+                    { label: 'Urdu Ghazal', prompt: 'اردو رسم الخط میں جدائی، شام اور امید پر ایک خوبصورت غزل لکھیں۔' },
+                    { label: 'Romantic Shayari', prompt: 'Write romantic two-line shayari in Roman Urdu about an unfinished conversation.' },
+                    { label: 'Hindi Veer Ras Kavita', prompt: 'Write a powerful Hindi Veer Ras kavita in Devanagari about courage and self-respect.' },
+                    { label: 'Nazm', prompt: 'Write a thoughtful nazm about memories returning with the first monsoon rain.' },
+                  ].map((item) => (
                     <button
-                      key={idx}
+                      key={item.label}
                       type="button"
                       onClick={() => handleSendMessage(item.prompt)}
-                      className="p-4 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] transition-all space-y-1.5 text-left cursor-pointer group"
+                      className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-gold)] hover:text-[var(--accent-gold)]"
                     >
-                      <div className="text-[11px] font-medium text-[var(--accent-gold)]">
-                        {item.tag}
-                      </div>
-                      <div className="font-display text-base font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-gold)] transition-colors">
-                        {item.label}
-                      </div>
-                      <p className="text-xs text-[var(--text-muted)] line-clamp-2">
-                        {item.prompt}
-                      </p>
+                      {item.label}
                     </button>
                   ))}
                 </div>
               </div>
             ) : (
-              /* Active Conversation Messages */
+              
               <div className="space-y-6">
                 {activeChat.messages.map((msg) => {
                   if (msg.role === 'assistant' && msg.isStreaming && !msg.content) {
@@ -1189,6 +1117,7 @@ export default function App() {
                       onRegenerate={handleRegenerateMessage}
                       onContinue={handleContinueMessage}
                       onFeedback={handleMessageFeedback}
+                      voice={settings.voice || 'auto'}
                     />
                   );
                 })}
@@ -1232,260 +1161,78 @@ export default function App() {
           </div>
         </main>
 
-        {/* Bottom ChatGPT-Style Composer Dock */}
-        <footer className="px-3 sm:px-6 pb-3 sm:pb-4 pt-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] shrink-0">
-          <div className="max-w-3xl mx-auto space-y-2.5">
-            {/* Contextual Follow-Up Quick Chips ONLY when latest response contains a poem */}
+        {/* Compact floating composer dock */}
+        <footer className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)]/95 px-3 pb-3 pt-2 backdrop-blur-xl sm:px-6 sm:pb-4">
+          <div className="mx-auto max-w-3xl space-y-2">
             {showPoetryFollowUpChips && (
-              <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
-                <span className="text-[11px] text-[var(--text-muted)] shrink-0 mr-1">
-                  Refine Poem:
-                </span>
-                {POETRY_FOLLOW_UP_SUGGESTIONS.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    disabled={isStreaming}
-                    onClick={() => handleSendMessage(chip)}
-                    className="px-2.5 py-1 rounded-md bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-gold)] transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
-                  >
-                    {chip}
-                  </button>
+              <div className="flex flex-wrap gap-1.5">
+                {POETRY_FOLLOW_UP_SUGGESTIONS.slice(0, 4).map((chip) => (
+                  <button key={chip} type="button" disabled={isStreaming} onClick={() => handleSendMessage(chip)} className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-[10px] text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-gold)] disabled:opacity-40">{chip}</button>
                 ))}
               </div>
             )}
 
-            {/* Collapsible Poetic Craft Helper Drawer */}
             {isCraftDrawerOpen && (
-              <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-strong)] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[var(--accent-gold)]">
-                    Poetic Craft Builder (Builds a Poetry Prompt)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setIsCraftDrawerOpen(false)}
-                    aria-label="Close poetic craft helper"
-                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div>
-                    <label
-                      htmlFor="craft-form-select"
-                      className="block text-[11px] text-[var(--text-muted)] mb-1"
-                    >
-                      Poetic Form
-                    </label>
-                    <select
-                      id="craft-form-select"
-                      value={craftForm}
-                      onChange={(e) =>
-                        setCraftForm(e.target.value as PoetryForm)
-                      }
-                      className="w-full rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
-                    >
-                      <option value="ghazal">Ghazal (غزل)</option>
-                      <option value="shayari">2-Line Shayari (شعر)</option>
-                      <option value="nazm">Nazm (نظم)</option>
-                      <option value="qita">Qita (قطعہ)</option>
-                      <option value="caption">Poetic Caption</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="craft-mood-select"
-                      className="block text-[11px] text-[var(--text-muted)] mb-1"
-                    >
-                      Mood (Kaifiyat)
-                    </label>
-                    <select
-                      id="craft-mood-select"
-                      value={craftMood}
-                      onChange={(e) =>
-                        setCraftMood(e.target.value as PoetryMood)
-                      }
-                      className="w-full rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
-                    >
-                      <option value="ishq">Ishq (Devotion)</option>
-                      <option value="hijr">Hijr (Longing)</option>
-                      <option value="nostalgia">Yaad (Nostalgia)</option>
-                      <option value="tasawwuf">Tasawwuf (Mystic)</option>
-                      <option value="melancholy">Melancholy</option>
-                      <option value="hope">Umeed (Hope)</option>
-                      <option value="inkilaab">Inkilaab (Resilience)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="craft-radif-input"
-                      className="block text-[11px] text-[var(--text-muted)] mb-1"
-                    >
-                      Optional Radif (Refrain)
-                    </label>
-                    <input
-                      id="craft-radif-input"
-                      type="text"
-                      value={craftRadif}
-                      onChange={(e) => setCraftRadif(e.target.value)}
-                      placeholder="e.g. hai abhi / ہے ابھی"
-                      className="w-full rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleInsertCraftPrompt}
-                    className="px-3 py-1.5 rounded-lg bg-[var(--accent-gold)] text-[var(--accent-fg)] text-xs font-semibold cursor-pointer"
-                  >
-                    Insert Poetry Prompt
-                  </button>
+              <div className="grid grid-cols-1 gap-2 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 sm:grid-cols-3">
+                <label className="space-y-1 text-[10px] text-[var(--text-muted)]">
+                  <span>Poetic form</span>
+                  <select value={craftForm} onChange={(event) => setCraftForm(event.target.value as PoetryForm)} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-2 text-xs text-[var(--text-primary)]">
+                    <option value="ghazal">Ghazal</option><option value="shayari">Shayari</option><option value="nazm">Nazm</option><option value="qita">Qita</option><option value="caption">Caption</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-[10px] text-[var(--text-muted)]">
+                  <span>Mood</span>
+                  <select value={craftMood} onChange={(event) => setCraftMood(event.target.value as PoetryMood)} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-2 text-xs text-[var(--text-primary)]">
+                    <option value="ishq">Ishq</option><option value="hijr">Hijr</option><option value="nostalgia">Nostalgia</option><option value="tasawwuf">Tasawwuf</option><option value="melancholy">Melancholy</option><option value="hope">Hope</option><option value="inkilaab">Inkilaab</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-[10px] text-[var(--text-muted)]">
+                  <span>Optional Radif</span>
+                  <input value={craftRadif} onChange={(event) => setCraftRadif(event.target.value)} placeholder="hai abhi / ہے ابھی" className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-2 text-xs text-[var(--text-primary)]" />
+                </label>
+                <div className="flex items-center justify-between gap-3 sm:col-span-3">
+                  <label className="flex items-center gap-2 text-[10px] text-[var(--text-secondary)]"><input type="checkbox" checked={useWebResearch} onChange={(event) => setUseWebResearch(event.target.checked)} className="accent-[var(--accent-gold)]" />Use web grounding for this chat</label>
+                  <button type="button" onClick={handleInsertCraftPrompt} className="rounded-xl bg-[var(--accent-gold)] px-3 py-2 text-xs font-semibold text-[var(--accent-fg)]">Apply craft</button>
                 </div>
               </div>
             )}
 
-            {/* Main Composer Box */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] focus-within:border-[var(--accent-gold)] transition-colors p-2.5 sm:p-3 space-y-2"
-            >
+            <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(); }} className="flex items-end gap-2 rounded-[1.6rem] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-2 shadow-[0_12px_42px_rgba(0,0,0,.10)] focus-within:border-[var(--accent-gold)]">
+              <button type="button" onClick={() => setIsCraftDrawerOpen((value) => !value)} aria-label="Poetic craft options" aria-expanded={isCraftDrawerOpen} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--accent-gold)]">
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
               <textarea
                 ref={composerRef}
                 id="sukhan-chat-input"
-                rows={2}
+                rows={1}
                 dir={composerDetection.scriptDirection}
                 value={composerText}
-                onChange={(e) => {
-                  setComposerText(e.target.value);
+                onChange={(event) => {
+                  setComposerText(event.target.value);
                   if (errorBanner) setErrorBanner(null);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                  event.target.style.height = 'auto';
+                  event.target.style.height = `${Math.min(event.target.scrollHeight, 128)}px`;
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); }
                 }}
-                placeholder="Message Sukhan AI... Chat normally about anything, or ask for a ghazal / shayari when you want one"
-                className={`w-full resize-none bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-sm sm:text-[15px] leading-relaxed ${
-                  composerDetection.detected === 'urdu'
-                    ? 'font-urdu text-lg text-right'
-                    : ''
-                }`}
+                placeholder="Message Sukhan AI…"
+                className={`max-h-32 min-h-10 flex-1 resize-none self-center bg-transparent px-1 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] ${composerDetection.detected === 'urdu' ? 'font-urdu text-right text-lg' : ''}`}
               />
-
-              {/* Bottom Composer Toolbar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Script Selector */}
-                  <div
-                    role="group"
-                    aria-label="Preferred output script"
-                    className="inline-flex items-center rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] p-0.5 text-[11px]"
-                  >
-                    {(
-                      [
-                        { id: 'auto', label: 'Auto' },
-                        { id: 'roman_urdu', label: 'Roman' },
-                        { id: 'urdu', label: 'اردو' },
-                        { id: 'hindi', label: 'हिन्दी' },
-                      ] as { id: PoetryLanguage; label: string }[]
-                    ).map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setComposerScript(opt.id)}
-                        aria-pressed={composerScript === opt.id}
-                        className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                          composerScript === opt.id
-                            ? 'bg-[var(--accent-gold)] text-[var(--accent-fg)] font-semibold'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleVoiceInput}
-                    aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
-                    aria-pressed={isVoiceListening}
-                    className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isVoiceListening ? 'bg-rose-500/20 border-rose-400 text-rose-200' : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                  >
-                    {isVoiceListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                    <span>{isVoiceListening ? 'Listening…' : 'Voice'}</span>
-                  </button>
-
-                  {/* Poetic Craft Drawer Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setIsCraftDrawerOpen((v) => !v)}
-                    aria-expanded={isCraftDrawerOpen}
-                    className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      isCraftDrawerOpen
-                        ? 'bg-[var(--bg-elevated)] border-[var(--accent-gold)] text-[var(--accent-gold)]'
-                        : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <SlidersHorizontal className="w-3.5 h-3.5" />
-                    <span>Poetic Craft</span>
-                  </button>
-
-                  {/* Web Grounding Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setUseWebResearch((v) => !v)}
-                    aria-pressed={useWebResearch}
-                    className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      useWebResearch
-                        ? 'bg-[var(--bg-elevated)] border-[var(--accent-gold)] text-[var(--accent-gold)]'
-                        : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Globe className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Web Grounding</span>
-                  </button>
-                </div>
-
-                {/* Send or Stop Button */}
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    onClick={handleStopGenerating}
-                    aria-label="Stop generating"
-                    className="px-3.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-rose-200 font-semibold text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Square className="w-3 h-3 fill-rose-300" />
-                    <span>Stop</span>
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    aria-label="Send message"
-                    className="px-4 py-1.5 rounded-xl bg-[var(--accent-gold)] hover:bg-[var(--accent-gold-hover)] text-[var(--accent-fg)] font-semibold text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <span>Send</span>
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+              <button type="button" onClick={handleVoiceInput} aria-label={isVoiceListening ? 'Stop dictation' : 'Dictate message'} aria-pressed={isVoiceListening} className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border transition-colors ${isVoiceListening ? 'border-rose-400 bg-rose-500/15 text-rose-400' : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent-gold)] hover:text-[var(--accent-gold)]'}`}>
+                {isVoiceListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </button>
+              <button type="button" onClick={() => setIsLiveVoiceOpen(true)} aria-label="Start live voice conversation" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--accent-gold)] transition-transform hover:scale-105 active:scale-95">
+                <AudioLines className="h-4 w-4" />
+              </button>
+              {isStreaming ? (
+                <button type="button" onClick={handleStopGenerating} aria-label="Stop generating" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-500/15 text-rose-400"><Square className="h-3.5 w-3.5" /></button>
+              ) : (
+                <button type="submit" disabled={!composerText.trim()} aria-label="Send message" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--accent-gold)] text-[var(--accent-fg)] transition-transform hover:scale-105 active:scale-95 disabled:opacity-40"><Send className="h-4 w-4" /></button>
+              )}
             </form>
           </div>
         </footer>
-      </div>
 
       {/* Settings Modal */}
       {isSettingsOpen && (
@@ -1518,37 +1265,16 @@ export default function App() {
 
             <div className="space-y-4 text-xs">
               {/* Theme Mode */}
-              <div className="flex items-center justify-between">
+              <div className="space-y-2">
                 <div>
-                  <div className="font-medium text-[var(--text-primary)]">
-                    Appearance Theme
-                  </div>
-                  <div className="text-[var(--text-muted)]">
-                    Switch between Midnight Plum Dark and Ivory Parchment Light
-                  </div>
+                  <div className="font-medium text-[var(--text-primary)]">Appearance</div>
+                  <div className="text-[var(--text-muted)]">Choose a reading surface</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      theme: prev.theme === 'dark' ? 'light' : 'dark',
-                    }))
-                  }
-                  className="px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-strong)] text-[var(--text-primary)] font-medium inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  {settings.theme === 'dark' ? (
-                    <>
-                      <Moon className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
-                      <span>Dark Mode</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sun className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
-                      <span>Light Mode</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-3 gap-2">
+                  {([{id:'dark',label:'Dark'},{id:'light',label:'Light'},{id:'warm',label:'Warm paper'}] as const).map((theme) => (
+                    <button key={theme.id} type="button" onClick={() => setSettings((prev) => ({...prev,theme:theme.id}))} aria-pressed={settings.theme === theme.id} className={`rounded-xl border px-2 py-2.5 text-xs transition-colors ${settings.theme === theme.id ? 'border-[var(--accent-gold)] bg-[var(--bg-elevated)] text-[var(--accent-gold)]' : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)]'}`}>{theme.label}</button>
+                  ))}
+                </div>
               </div>
 
               {/* Default Script */}
@@ -1610,6 +1336,27 @@ export default function App() {
                     Progressive / Inkilaabi
                   </option>
                 </select>
+              </div>
+
+              {/* Voice and backend */}
+              <div className="space-y-3 border-t border-[var(--border-subtle)] pt-3">
+                <div className="space-y-1.5">
+                  <label htmlFor="settings-voice" className="block font-medium text-[var(--text-primary)]">Read-aloud voice</label>
+                  <select id="settings-voice" value={settings.voice || 'auto'} onChange={(event) => setSettings((prev) => ({...prev,voice:event.target.value}))} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-xs text-[var(--text-primary)]">
+                    <option value="auto">Auto · match the poem language</option>
+                    <option value="ur-PK-UzmaNeural">Urdu · Uzma (Pakistan)</option>
+                    <option value="ur-IN-GulNeural">Urdu · Gul (India)</option>
+                    <option value="hi-IN-SwaraNeural">Hindi · Swara</option>
+                    <option value="hi-IN-MadhurNeural">Hindi · Madhur</option>
+                    <option value="en-IN-NeerjaNeural">English · Neerja (India)</option>
+                    <option value="en-IN-PrabhatNeural">English · Prabhat (India)</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="settings-api-url" className="block font-medium text-[var(--text-primary)]">Backend URL for Android APK</label>
+                  <input id="settings-api-url" type="url" value={settings.apiBaseUrl || ''} onChange={(event) => setSettings((prev) => ({...prev,apiBaseUrl:event.target.value}))} placeholder="https://your-service.run.app" className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]" />
+                  <p className="text-[10px] leading-4 text-[var(--text-muted)]">Set this to your HTTPS Node backend. Provider API keys are never entered into the app.</p>
+                </div>
               </div>
 
               {/* Show Translations */}
@@ -1674,6 +1421,13 @@ export default function App() {
             <FarhangView onApplyLexiconTerm={handleApplyLexiconTerm} />
           </div>
         </div>
+      )}
+      {isLiveVoiceOpen && (
+        <LiveVoiceModal
+          onClose={closeLiveVoice}
+          language={composerScript === 'auto' ? (settings.defaultScript || 'ur') : composerScript}
+          voice={settings.voice || 'auto'}
+        />
       )}
     </div>
   );

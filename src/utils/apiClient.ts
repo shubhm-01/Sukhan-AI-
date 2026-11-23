@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import {
   buildContextualChatReply,
   detectUserIntent,
@@ -60,8 +59,10 @@ export function hasBackendApiAvailable(
   const rawEnvBase =
     typeof envBaseUrl === 'string'
       ? envBaseUrl
-      : typeof import.meta !== 'undefined' && import.meta.env
+      : typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL
       ? String(import.meta.env.VITE_API_BASE_URL || '')
+      : typeof window !== 'undefined'
+      ? window.localStorage.getItem('sukhan_api_base_url') || ''
       : '';
 
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
@@ -87,8 +88,10 @@ export function resolveApiUrl(
   const rawEnvBase =
     typeof envBaseUrl === 'string'
       ? envBaseUrl
-      : typeof import.meta !== 'undefined' && import.meta.env
+      : typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL
       ? String(import.meta.env.VITE_API_BASE_URL || '')
+      : typeof window !== 'undefined'
+      ? window.localStorage.getItem('sukhan_api_base_url') || ''
       : '';
 
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
@@ -194,9 +197,8 @@ async function streamTextIncrementally(
  * and the installed Android APK work identically under all conditions:
  *  1. Backend SSE Stream (/api/chat/stream — when web server or VITE_API_BASE_URL is active)
  *  2. Backend Unary JSON (/api/chat/message — when web server or VITE_API_BASE_URL is active)
- *  3. Direct Gemini HTTPS REST & SDK (when VITE_GEMINI_API_KEY or GEMINI_API_KEY is bundled)
- *  4. Live Cloud AI Endpoints (https://text.pollinations.ai/openai + GET fallback — zero-key live LLM for standalone APK)
- *  5. Built-in On-Device Sukhan Conversational & Literary Engine (offline fallback)
+ *  3. Live Cloud AI Endpoints (https://text.pollinations.ai/openai + GET fallback — zero-key live LLM for standalone APK)
+ *  4. Built-in On-Device Sukhan Conversational & Literary Engine (offline fallback)
  */
 export async function executeResilientChatTurn(
   options: ChatTurnOptions
@@ -323,116 +325,8 @@ export async function executeResilientChatTurn(
     }
   }
 
-  // Tier 3: Direct Gemini API (REST fetch + SDK fallback when VITE_GEMINI_API_KEY is bundled)
-  const clientApiKey =
-    typeof import.meta !== 'undefined' && import.meta.env
-      ? String(import.meta.env.VITE_GEMINI_API_KEY || '').trim()
-      : '';
-
-  if (
-    clientApiKey &&
-    clientApiKey !== 'MY_GEMINI_API_KEY' &&
-    !clientApiKey.startsWith('AQ.')
-  ) {
-    const formattedContents = messages.slice(-16).map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-
-    const modelsToTry = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-3.8-flash',
-      'gemini-3.1-flash-lite',
-    ];
-
-    // 3A. Pure HTTPS REST fetch (immune to SDK minification/obfuscation in APK builds)
-    for (const modelId of modelsToTry) {
-      if (signal.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-      try {
-        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${encodeURIComponent(
-          clientApiKey
-        )}`;
-        const restRes = await fetch(restUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            contents: formattedContents,
-            generationConfig: { temperature: 0.75 },
-          }),
-        });
-
-        if (restRes.ok) {
-          const restJson = await restRes.json();
-          const parts = restJson?.candidates?.[0]?.content?.parts;
-          const rawText = Array.isArray(parts)
-            ? parts.map((p: any) => p?.text || '').join('').trim()
-            : '';
-          if (rawText) {
-            const cleanedText = sanitizeAiOutput(rawText, userIntent);
-            await streamTextIncrementally(
-              cleanedText,
-              signal,
-              onChunk,
-              onComplete
-            );
-            return;
-          }
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          throw err;
-        }
-        // Try next model
-      }
-    }
-
-    // 3B. GoogleGenAI SDK fallback
-    try {
-      const ai = new GoogleGenAI({ apiKey: clientApiKey });
-      for (const modelId of modelsToTry) {
-        if (signal.aborted) {
-          throw new DOMException('Aborted', 'AbortError');
-        }
-        try {
-          const response = await ai.models.generateContent({
-            model: modelId,
-            contents: formattedContents,
-            config: {
-              systemInstruction,
-              temperature: 0.75,
-              ...(useWebResearch ? { tools: [{ googleSearch: {} }] } : {}),
-            },
-          });
-
-          const rawText = response.text?.trim();
-          if (rawText) {
-            const cleanedText = sanitizeAiOutput(rawText, userIntent);
-            await streamTextIncrementally(
-              cleanedText,
-              signal,
-              onChunk,
-              onComplete
-            );
-            return;
-          }
-        } catch {
-          // Try next model
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw err;
-      }
-      // Proceed to Tier 4
-    }
-  }
-
-  // Tier 4A: Live Cloud AI POST Endpoint (Works inside the installed Android APK with zero API key setup!)
+  // Tier 3: Provider secrets are server-only; never bundle them in the APK.
+  // Tier 3A: Live Cloud AI POST Endpoint (Works inside the installed Android APK with zero API key setup!)
   try {
     const openAiMessages = [
       { role: 'system', content: systemInstruction },
@@ -477,7 +371,7 @@ export async function executeResilientChatTurn(
     // Proceed to Tier 4B
   }
 
-  // Tier 4B: Live Cloud AI GET Endpoint Fallback
+  // Tier 3B: Live Cloud AI GET Endpoint Fallback
   try {
     const promptUrl = `https://text.pollinations.ai/${encodeURIComponent(
       lastUserMsg
@@ -508,7 +402,7 @@ export async function executeResilientChatTurn(
     // Proceed to Tier 5
   }
 
-  // Tier 5: On-Device Sukhan Conversational & Literary Engine (Offline Fallback)
+  // Tier 4: On-Device Sukhan Conversational & Literary Engine (Offline Fallback)
   if (signal.aborted) {
     throw new DOMException('Aborted', 'AbortError');
   }

@@ -49,6 +49,7 @@ xml = xml.replace(
 const permissionsBlock = `    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application`;
 
@@ -76,7 +77,7 @@ if (!xml.includes('android:windowSoftInputMode')) {
 }
 
 fs.writeFileSync(manifestPath, xml, 'utf8');
-console.log('[Sukhan APK Patch] Patched AndroidManifest.xml with INTERNET, ACCESS_NETWORK_STATE, RECORD_AUDIO, cleartextTraffic, and networkSecurityConfig.');
+console.log('[Sukhan APK Patch] Patched AndroidManifest.xml with INTERNET, ACCESS_NETWORK_STATE, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, cleartextTraffic, and networkSecurityConfig.');
 
 // 3. Patch android/app/build.gradle: disable R8/ProGuard obfuscation (minifyEnabled false, shrinkResources false)
 const appGradlePath = path.join(rootDir, 'android', 'app', 'build.gradle');
