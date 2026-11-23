@@ -6,8 +6,7 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
-import { applicationDefault, cert, getApps as getAdminApps, initializeApp as initializeAdminApp } from 'firebase-admin/app';
-import { getAuth as getFirebaseAdminAuth } from 'firebase-admin/auth';
+import { createClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
@@ -368,7 +367,8 @@ async function startServer() {
       ok: true,
       service: 'sukhan-ai-api',
       aiConfigured,
-      liveVoiceConfigured: Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET),
+      liveVoiceConfigured: Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && process.env.GROQ_API_KEY),
+      supabaseConfigured: Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY)),
       timestamp: new Date().toISOString(),
     });
   });
@@ -381,13 +381,13 @@ async function startServer() {
     res.json({ query: q, provider: 'DuckDuckGo', results, count: results.length });
   });
 
-  // Legacy unauthenticated ownerId-based endpoints are retired.
-  // Guests use localStorage; signed-in users use the existing owner-checked Firestore rules.
+  // Chat persistence now uses Supabase Auth + Postgres RLS directly from the client.
+  // Guest data remains local-first; this legacy ownerId endpoint stays intentionally disabled.
   app.get('/api/chats', (_req, res) => {
-    res.status(410).json({ error: 'This legacy endpoint is retired. Use local chat storage or authenticated Firestore sync.' });
+    res.status(410).json({ error: 'This legacy endpoint is retired. Use local chat storage or authenticated Supabase sync.' });
   });
   app.post('/api/chats/sync', (_req, res) => {
-    res.status(410).json({ error: 'This legacy endpoint is retired. Use authenticated Firestore sync.' });
+    res.status(410).json({ error: 'This legacy endpoint is retired. Use authenticated Supabase sync.' });
   });
 
   // In-memory per-process rate limit. Use an API gateway for shared limits at scale.
@@ -404,18 +404,21 @@ async function startServer() {
     return true;
   }
 
-  let adminAuth: ReturnType<typeof getFirebaseAdminAuth> | null = null;
-  function getAdminAuthService() {
-    if (adminAuth) return adminAuth;
-    const projectId = process.env.FIREBASE_PROJECT_ID || 'storied-hawk-tn50x';
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
-    const credential = serviceAccountJson
-      ? cert(JSON.parse(serviceAccountJson))
-      : applicationDefault();
-    const existing = getAdminApps().find((item) => item.name === 'sukhan-api');
-    const adminApp = existing || initializeAdminApp({ credential, projectId }, 'sukhan-api');
-    adminAuth = getFirebaseAdminAuth(adminApp);
-    return adminAuth;
+  let supabaseAuthClient: ReturnType<typeof createClient> | null = null;
+  function getSupabaseAuthClient() {
+    if (supabaseAuthClient) return supabaseAuthClient;
+    const url = process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim() || '';
+    const key = process.env.SUPABASE_ANON_KEY?.trim()
+      || process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+      || process.env.VITE_SUPABASE_ANON_KEY?.trim()
+      || '';
+    if (!url || !key) {
+      throw new Error('Supabase Auth verification is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY to the backend secrets.');
+    }
+    supabaseAuthClient = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    return supabaseAuthClient;
   }
 
   const ALLOWED_EDGE_VOICES = new Set([
@@ -438,18 +441,20 @@ async function startServer() {
       return;
     }
 
-    let decodedToken;
+    let authenticatedUser;
     try {
-      decodedToken = await getAdminAuthService().verifyIdToken(idToken);
+      const { data, error } = await getSupabaseAuthClient().auth.getUser(idToken);
+      if (error || !data.user) throw error || new Error('Session not found');
+      authenticatedUser = data.user;
     } catch {
-      res.status(401).json({ error: 'Your sign-in session could not be verified. Sign in again and retry.' });
+      res.status(401).json({ error: 'Your Supabase session could not be verified. Sign in again and retry.' });
       return;
     }
-    if (decodedToken.email_verified !== true) {
+    if (!authenticatedUser.email_confirmed_at) {
       res.status(403).json({ error: 'Verify your account email before starting Live Voice.' });
       return;
     }
-    if (!allowRequest(`livekit-user:${decodedToken.uid}`, 8, 60_000)) {
+    if (!allowRequest(`livekit-user:${authenticatedUser.id}`, 8, 60_000)) {
       res.status(429).json({ error: 'You have started too many live sessions. Please wait a minute.' });
       return;
     }
@@ -470,8 +475,8 @@ async function startServer() {
     const requestedVoice = String(req.body?.voice || 'auto');
     const voice = requestedVoice === 'auto' || ALLOWED_EDGE_VOICES.has(requestedVoice)
       ? requestedVoice : 'auto';
-    const roomName = `sukhan-${decodedToken.uid.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
-    const identity = `listener-${decodedToken.uid.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+    const roomName = `sukhan-${authenticatedUser.id.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+    const identity = `listener-${authenticatedUser.id.slice(0, 10)}-${randomUUID().slice(0, 8)}`;
 
     try {
       const apiHost = liveKitUrl.replace(/^wss:\/\//i, 'https://').replace(/^ws:\/\//i, 'http://');
@@ -482,7 +487,7 @@ async function startServer() {
 
       const accessToken = new AccessToken(liveKitKey, liveKitSecret, {
         identity,
-        name: decodedToken.name || 'Sukhan AI Listener',
+        name: authenticatedUser.user_metadata?.full_name || authenticatedUser.email || 'Sukhan AI Listener',
         ttl: '10m',
       });
       accessToken.addGrant({
