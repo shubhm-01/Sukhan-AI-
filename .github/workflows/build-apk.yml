@@ -126,7 +126,7 @@ jobs:
               const path = require("path");
               const xmlDir = "android/app/src/main/res/xml";
               fs.mkdirSync(xmlDir, { recursive: true });
-              fs.writeFileSync(path.join(xmlDir, "network_security_config.xml"), `<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted="true">\n        <trust-anchors>\n            <certificates src="system" />\n            <certificates src="user" />\n        </trust-anchors>\n    </base-config>\n</network-security-config>\n`, "utf8");
+              fs.writeFileSync(path.join(xmlDir, "network_security_config.xml"), `<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted="false">\n        <trust-anchors>\n            <certificates src="system" />\n            <certificates src="user" />\n        </trust-anchors>\n    </base-config>\n</network-security-config>\n`, "utf8");
               const p = "android/app/src/main/AndroidManifest.xml";
               if (fs.existsSync(p)) {
                 let xml = fs.readFileSync(p, "utf8");
