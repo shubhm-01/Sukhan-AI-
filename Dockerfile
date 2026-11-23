@@ -1,22 +1,27 @@
 FROM node:22-slim
 
+ENV DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=production \
+    PORT=7860 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Edge TTS is invoked only by the Node API, not in the Android WebView.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-pip ffmpeg ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-RUN python3 -m venv /opt/edge-tts \
-    && /opt/edge-tts/bin/pip install --no-cache-dir edge-tts
-ENV PATH="/opt/edge-tts/bin:${PATH}"
+
+RUN python3 -m venv /opt/sukhan-python
+ENV PATH="/opt/sukhan-python/bin:$PATH"
 
 COPY package.json ./
 RUN npm install --no-audit --no-fund --legacy-peer-deps
 
+COPY livekit-agent/requirements.txt ./livekit-agent/requirements.txt
+RUN pip install --no-cache-dir -r livekit-agent/requirements.txt
+
 COPY . .
 RUN npm run build
 
-ENV NODE_ENV=production
-ENV PORT=8080
-EXPOSE 8080
-
-CMD ["npm", "start"]
+EXPOSE 7860
+CMD ["bash", "./start.sh"]
