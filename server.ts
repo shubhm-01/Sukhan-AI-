@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
@@ -441,7 +441,17 @@ async function startServer() {
       return;
     }
 
-    let authenticatedUser;
+    const supabaseUrl = process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim() || '';
+    const supabaseKey = process.env.SUPABASE_ANON_KEY?.trim()
+      || process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+      || process.env.VITE_SUPABASE_ANON_KEY?.trim()
+      || '';
+    if (!supabaseUrl || !supabaseKey) {
+      res.status(503).json({ error: 'Supabase Auth is not configured on the backend. Add SUPABASE_URL and SUPABASE_ANON_KEY to backend secrets.' });
+      return;
+    }
+
+    let authenticatedUser: SupabaseAuthUser;
     try {
       const { data, error } = await getSupabaseAuthClient().auth.getUser(idToken);
       if (error || !data.user) throw error || new Error('Session not found');
