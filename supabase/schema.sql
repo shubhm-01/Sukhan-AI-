@@ -10,7 +10,8 @@ create table if not exists public.chats (
   title text not null default 'Conversation',
   saved boolean not null default false,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint chats_id_user_id_unique unique (id, user_id)
 );
 
 create index if not exists chats_user_updated_idx
@@ -35,8 +36,6 @@ create table if not exists public.messages (
 create index if not exists messages_user_chat_created_idx
   on public.messages (user_id, chat_id, created_at);
 
-alter table public.chats
-  add constraint chats_id_user_id_unique unique (id, user_id);
 
 create table if not exists public.saved_poems (
   id text primary key,
@@ -47,7 +46,7 @@ create table if not exists public.saved_poems (
   constraint saved_poems_chat_owner_fk
     foreign key (chat_id, user_id)
     references public.chats(id, user_id)
-    on delete set null
+    on delete set null (chat_id)
 );
 
 create index if not exists saved_poems_user_created_idx
