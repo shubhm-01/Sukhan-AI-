@@ -16,7 +16,7 @@ if (!fs.existsSync(manifestPath)) {
   process.exit(0);
 }
 
-// 1. Create res/xml/network_security_config.xml to permit HTTPS + cleartext traffic on Android 9-15
+// 1. Create res/xml/network_security_config.xml and require trusted HTTPS on Android 9-15
 const xmlResDir = path.join(rootDir, 'android', 'app', 'src', 'main', 'res', 'xml');
 fs.mkdirSync(xmlResDir, { recursive: true });
 const netSecPath = path.join(xmlResDir, 'network_security_config.xml');
