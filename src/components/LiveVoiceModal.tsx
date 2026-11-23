@@ -48,14 +48,12 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({ onClose, languag
 
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== Track.Kind.Audio || !audioMountRef.current) return;
-      const attached = track.attach();
-      audioElements = [...audioElements, ...attached];
-      attached.forEach((element) => {
-        element.autoplay = true;
-        element.setAttribute('playsinline', 'true');
-        audioMountRef.current?.appendChild(element);
-        void element.play().catch(() => setError('Tap the screen once to enable the speaker output.'));
-      });
+      const element = track.attach();
+      audioElements = [...audioElements, element];
+      element.autoplay = true;
+      element.setAttribute('playsinline', 'true');
+      audioMountRef.current.appendChild(element);
+      void element.play().catch(() => setError('Tap the screen once to enable the speaker output.'));
     });
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       track.detach().forEach((element) => {
