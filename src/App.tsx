@@ -44,7 +44,6 @@ import {
   LexiconEntry,
   INITIAL_SEED_CHATS,
   deriveChatTitle,
-  sanitizeId,
   detectLanguageAndScript,
   detectUserIntent,
 } from './utils/poetryLogic';
@@ -53,25 +52,16 @@ import {
   hasBackendApiAvailable,
   executeResilientChatTurn,
 } from './utils/apiClient';
+import { supabase, type SupabaseUser } from './lib/supabase';
 import {
-  db,
-  auth,
-  onAuthStateChanged,
-  signInWithGoogle,
-  signOutUser,
-  collection,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  query,
-  where,
-  serverTimestamp,
-  OperationType,
-  handleFirestoreError,
-  User,
-} from './lib/firebase';
+  deleteChatFromCloud,
+  persistChatToCloud,
+  persistMessageToCloud,
+  syncLocalDataToCloud,
+  updateChatInCloud,
+  updateMessageInCloud,
+} from './lib/cloudSync';
+import { AuthModal } from './components/AuthModal';
 
 const STORAGE_CHATS_KEY = 'sukhan_ai_chats_v3';
 const STORAGE_ACTIVE_CHAT_KEY = 'sukhan_ai_active_chat_v3';
@@ -148,7 +138,7 @@ export default function App() {
   }, [settings]);
 
   // Firebase Auth User
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [authReady, setAuthReady] = useState<boolean>(false);
 
   // Conversations State
@@ -180,6 +170,7 @@ export default function App() {
   const [filterSavedOnly, setFilterSavedOnly] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
   const [isSavedPoemsOpen, setIsSavedPoemsOpen] = useState<boolean>(false);
   const closeLiveVoice = useCallback(() => setIsLiveVoiceOpen(false), []);
@@ -235,128 +226,82 @@ export default function App() {
     syncChatsToServer(chats);
   }, [chats, syncChatsToServer]);
 
-  // Firebase Auth listener & Firestore User-Isolated Sync
+  // Supabase Auth listener. Guests continue using localStorage without a cloud connection.
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+    if (!supabase) {
       setAuthReady(true);
+      return;
+    }
 
-      if (currentUser && currentUser.emailVerified) {
-        const chatsPath = 'chats';
-        try {
-          const q = query(
-            collection(db, chatsPath),
-            where('ownerId', '==', currentUser.uid)
-          );
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            const loadedThreads: ChatThread[] = [];
-            for (const chatDoc of snap.docs) {
-              const cData = chatDoc.data();
-              const msgPath = `chats/${chatDoc.id}/messages`;
-              let msgs: ChatMessageItem[] = [];
-              try {
-                const mQ = query(
-                  collection(db, msgPath),
-                  where('ownerId', '==', currentUser.uid)
-                );
-                const mSnap = await getDocs(mQ);
-                msgs = mSnap.docs
-                  .map((d) => {
-                    const md = d.data();
-                    return {
-                      id: d.id,
-                      chatId: chatDoc.id,
-                      ownerId: String(md.ownerId || currentUser.uid),
-                      role: (md.role === 'assistant' ? 'assistant' : 'user') as
-                        | 'user'
-                        | 'assistant',
-                      content: String(md.content || ''),
-                      feedback: (md.feedback || 'none') as MessageFeedback,
-                      createdAt:
-                        md.createdAt?.toDate?.()?.toISOString?.() ||
-                        new Date().toISOString(),
-                      updatedAt:
-                        md.updatedAt?.toDate?.()?.toISOString?.() ||
-                        new Date().toISOString(),
-                    };
-                  })
-                  .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-              } catch (err) {
-                handleFirestoreError(err, OperationType.LIST, msgPath);
-              }
-
-              loadedThreads.push({
-                id: chatDoc.id,
-                ownerId: String(cData.ownerId || currentUser.uid),
-                title: String(cData.title || 'Conversation'),
-                saved: Boolean(cData.saved),
-                createdAt:
-                  cData.createdAt?.toDate?.()?.toISOString?.() ||
-                  new Date().toISOString(),
-                updatedAt:
-                  cData.updatedAt?.toDate?.()?.toISOString?.() ||
-                  new Date().toISOString(),
-                messages: msgs,
-              });
-            }
-
-            if (loadedThreads.length > 0) {
-              loadedThreads.sort((a, b) =>
-                b.updatedAt.localeCompare(a.updatedAt)
-              );
-              setChats(loadedThreads);
-              setActiveChatId(loadedThreads[0].id);
-            }
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.LIST, chatsPath);
-        }
-      }
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthReady(true);
     });
-    return () => unsub();
+
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        setErrorBanner({ message: `Could not restore cloud sign-in: ${error.message}` });
+      }
+      setUser(data.session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Helper to persist a chat and message to Firestore when user is signed in
+  // On sign-in, merge this device's offline-first history and saved poems into the
+  // authenticated account, then hydrate the device with the account's cloud history.
+  useEffect(() => {
+    if (!authReady || !user) return;
+    let cancelled = false;
+
+    const syncAfterSignIn = async () => {
+      try {
+        const syncedThreads = await syncLocalDataToCloud(user.id, chats);
+        if (cancelled) return;
+        if (syncedThreads.length > 0) {
+          setChats(syncedThreads);
+          setActiveChatId((current) =>
+            syncedThreads.some((chat) => chat.id === current) ? current : syncedThreads[0].id
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setErrorBanner({
+            message: `Cloud sync failed. Your chats remain safely stored on this device. ${err instanceof Error ? err.message : ''}`,
+          });
+        }
+      }
+    };
+
+    void syncAfterSignIn();
+    return () => { cancelled = true; };
+  }, [authReady, user?.id]);
+
   const persistChatToFirestore = async (chat: ChatThread) => {
-    if (!authReady || !user || !user.emailVerified) return;
-    const chatId = sanitizeId(chat.id);
-    const chatPath = `chats/${chatId}`;
+    if (!authReady || !user) return;
     try {
-      await setDoc(doc(db, 'chats', chatId), {
-        ownerId: user.uid,
-        title: chat.title.slice(0, 200) || 'Conversation',
-        saved: Boolean(chat.saved),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await persistChatToCloud(user.id, chat);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, chatPath);
+      setErrorBanner({
+        message: `Could not sync this chat to the cloud. It is still saved locally. ${err instanceof Error ? err.message : ''}`,
+      });
     }
   };
 
-  const persistMessageToFirestore = async (
-    chatIdRaw: string,
-    msg: ChatMessageItem
-  ) => {
-    if (!authReady || !user || !user.emailVerified) return;
-    const chatId = sanitizeId(chatIdRaw);
-    const messageId = sanitizeId(msg.id);
-    const msgPath = `chats/${chatId}/messages/${messageId}`;
-    const safeContent = (msg.content || '').slice(0, 20000);
-    if (!safeContent) return;
+  const persistMessageToFirestore = async (chatId: string, msg: ChatMessageItem) => {
+    if (!authReady || !user || !msg.content?.trim()) return;
     try {
-      await setDoc(doc(db, 'chats', chatId, 'messages', messageId), {
-        chatId,
-        ownerId: user.uid,
-        role: msg.role,
-        content: safeContent,
-        feedback: msg.feedback || 'none',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await persistMessageToCloud(user.id, chatId, msg);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, msgPath);
+      setErrorBanner({
+        message: `Could not sync this message to the cloud. It is still saved locally. ${err instanceof Error ? err.message : ''}`,
+      });
     }
   };
 
@@ -439,7 +384,7 @@ export default function App() {
           const finalMsg: ChatMessageItem = {
             id: assistantMsgId,
             chatId: targetChatId,
-            ownerId: user?.uid || 'guest',
+            ownerId: user?.id || 'guest',
             role: 'assistant',
             content: finalContent,
             feedback: 'none',
@@ -512,7 +457,7 @@ export default function App() {
     }
 
     const now = new Date().toISOString();
-    const ownerId = user?.uid || 'guest';
+    const ownerId = user?.id || 'guest';
     let targetChat = activeChat;
 
     // Create a new chat thread if none exists
@@ -595,7 +540,7 @@ export default function App() {
     const now = new Date().toISOString();
     const newChat: ChatThread = {
       id: `chat-${Date.now()}`,
-      ownerId: user?.uid || 'guest',
+      ownerId: user?.id || 'guest',
       title: 'New Chat',
       saved: false,
       createdAt: now,
@@ -622,15 +567,11 @@ export default function App() {
       )
     );
 
-    if (authReady && user && user.emailVerified) {
-      const safeId = sanitizeId(chatId);
+    if (authReady && user) {
       try {
-        await updateDoc(doc(db, 'chats', safeId), {
-          title: cleanTitle,
-          updatedAt: serverTimestamp(),
-        });
+        await updateChatInCloud(user.id, chatId, { title: cleanTitle });
       } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `chats/${safeId}`);
+        setErrorBanner({ message: `Could not update cloud chat. Local copy is safe. ${err instanceof Error ? err.message : ''}` });
       }
     }
   };
@@ -648,15 +589,11 @@ export default function App() {
       )
     );
 
-    if (authReady && user && user.emailVerified) {
-      const safeId = sanitizeId(chatId);
+    if (authReady && user) {
       try {
-        await updateDoc(doc(db, 'chats', safeId), {
-          saved: nextSaved,
-          updatedAt: serverTimestamp(),
-        });
+        await updateChatInCloud(user.id, chatId, { saved: nextSaved });
       } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `chats/${safeId}`);
+        setErrorBanner({ message: `Could not update cloud chat. Local copy is safe. ${err instanceof Error ? err.message : ''}` });
       }
     }
   };
@@ -668,7 +605,7 @@ export default function App() {
       const now = new Date().toISOString();
       const fresh: ChatThread = {
         id: `chat-${Date.now()}`,
-        ownerId: user?.uid || 'guest',
+        ownerId: user?.id || 'guest',
         title: 'New Chat',
         saved: false,
         createdAt: now,
@@ -684,12 +621,11 @@ export default function App() {
       }
     }
 
-    if (authReady && user && user.emailVerified) {
-      const safeId = sanitizeId(chatId);
+    if (authReady && user) {
       try {
-        await deleteDoc(doc(db, 'chats', safeId));
+        await deleteChatFromCloud(user.id, chatId);
       } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `chats/${safeId}`);
+        setErrorBanner({ message: `Could not delete the cloud copy. Your local view was updated. ${err instanceof Error ? err.message : ''}` });
       }
     }
   };
@@ -716,7 +652,7 @@ export default function App() {
     const placeholderAssistantMsg: ChatMessageItem = {
       id: assistantMsgId,
       chatId: activeChat.id,
-      ownerId: user?.uid || 'guest',
+      ownerId: user?.id || 'guest',
       role: 'assistant',
       content: '',
       feedback: 'none',
@@ -758,7 +694,7 @@ export default function App() {
     const placeholderAssistantMsg: ChatMessageItem = {
       id: assistantMsgId,
       chatId: activeChat.id,
-      ownerId: user?.uid || 'guest',
+      ownerId: user?.id || 'guest',
       role: 'assistant',
       content: '',
       feedback: 'none',
@@ -818,23 +754,11 @@ export default function App() {
       )
     );
 
-    if (authReady && user && user.emailVerified) {
-      const safeChatId = sanitizeId(activeChat.id);
-      const safeMsgId = sanitizeId(messageId);
+    if (authReady && user) {
       try {
-        await updateDoc(
-          doc(db, 'chats', safeChatId, 'messages', safeMsgId),
-          {
-            feedback,
-            updatedAt: serverTimestamp(),
-          }
-        );
+        await updateMessageInCloud(user.id, activeChat.id, messageId, feedback);
       } catch (err) {
-        handleFirestoreError(
-          err,
-          OperationType.UPDATE,
-          `chats/${safeChatId}/messages/${safeMsgId}`
-        );
+        setErrorBanner({ message: `Could not sync message feedback. ${err instanceof Error ? err.message : ''}` });
       }
     }
   };
@@ -998,14 +922,14 @@ export default function App() {
         onOpenFarhangModal={() => setIsFarhangOpen(true)}
         onOpenSavedPoems={() => setIsSavedPoemsOpen(true)}
         user={user}
-        onSignIn={async () => {
+        onSignIn={() => setIsAuthModalOpen(true)}
+        onSignOut={async () => {
           try {
-            await signInWithGoogle();
-          } catch {
-            // Popup closed by user
+            await supabase?.auth.signOut();
+          } catch (err) {
+            setErrorBanner({ message: err instanceof Error ? err.message : 'Could not sign out.' });
           }
         }}
-        onSignOut={signOutUser}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
@@ -1427,6 +1351,7 @@ export default function App() {
         </div>
       )}
       {isSavedPoemsOpen && <SavedPoemsModal onClose={() => setIsSavedPoemsOpen(false)} />}
+      {isAuthModalOpen && <AuthModal onClose={() => setIsAuthModalOpen(false)} />}
       {isLiveVoiceOpen && (
         <LiveVoiceModal
           onClose={closeLiveVoice}
