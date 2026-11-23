@@ -36,7 +36,7 @@ jobs:
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Normalize package.json for public npm registry & ensure Firebase config
+      - name: Normalize package.json for public npm registry
         run: |
           if [ -f "scripts/prepare-apk-build.mjs" ]; then
             node scripts/prepare-apk-build.mjs
@@ -58,7 +58,7 @@ jobs:
                 "@vitejs/plugin-react": "^4.3.0",
                 "dotenv": "^16.4.0",
                 "express": "^4.21.0",
-                "firebase": "^11.0.0",
+                "@supabase/supabase-js": "2.119.2",
                 "lucide-react": "^0.460.0",
                 "motion": "^12.0.0",
                 "react": "^19.0.0",
@@ -77,18 +77,7 @@ jobs:
                 "typescript": "^5.7.0"
               };
               fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n", "utf8");
-              if (!fs.existsSync("firebase-applet-config.json")) {
-                fs.writeFileSync("firebase-applet-config.json", JSON.stringify({
-                  projectId: "storied-hawk-tn50x",
-                  appId: "1:117334778546:web:495089c9d869f0a8149fab",
-                  apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyDpvVm1a7-UmjL7m0Dj48-C2V1sq6AW5fc",
-                  authDomain: "storied-hawk-tn50x.firebaseapp.com",
-                  firestoreDatabaseId: "ai-studio-sukhanai-4d175da9-2da9-4f4a-8c4a-b0bd756154f2",
-                  storageBucket: "storied-hawk-tn50x.firebasestorage.app",
-                  messagingSenderId: "117334778546",
-                  measurementId: ""
-                }, null, 2) + "\n", "utf8");
-              }
+
             '
           fi
 
@@ -99,6 +88,8 @@ jobs:
       - name: Build production web bundle (dist)
         env:
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || vars.VITE_API_BASE_URL || secrets.SUKHAN_API_BASE_URL || vars.SUKHAN_API_BASE_URL || '' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL || '' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || vars.VITE_SUPABASE_ANON_KEY || '' }}
         run: |
           npm run build
 
