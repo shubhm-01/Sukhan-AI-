@@ -67,7 +67,7 @@ export function hasBackendApiAvailable(
 
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
   if (isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
-    return /^https?:\/\//i.test(trimmedBase);
+    return /^https:\/\//i.test(trimmedBase);
   }
   return true;
 }
@@ -97,7 +97,8 @@ export function resolveApiUrl(
   const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
 
   if (isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
-    return trimmedBase ? `${trimmedBase}${cleanPath}` : cleanPath;
+    const httpsBase = /^https:\/\//i.test(trimmedBase) ? trimmedBase : '';
+    return httpsBase ? `${httpsBase}${cleanPath}` : cleanPath;
   }
 
   return cleanPath;
