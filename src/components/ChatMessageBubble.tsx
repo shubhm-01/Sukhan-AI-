@@ -121,7 +121,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         : [{
             id: message.id,
             chatId: message.chatId,
-            content: message.content.replace(/\\[\\/?VERSE\\]/gi, '').trim(),
+            content: message.content.replace(/\[\/?VERSE\]/gi, '').trim(),
             createdAt: new Date().toISOString(),
           }, ...saved];
       localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(next.slice(0, 250)));
