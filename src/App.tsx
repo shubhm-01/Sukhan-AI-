@@ -31,6 +31,7 @@ import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
 import { FarhangView } from './components/FarhangView';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
+import { SavedPoemsModal } from './components/SavedPoemsModal';
 import {
   ChatThread,
   ChatMessageItem,
@@ -180,6 +181,7 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
+  const [isSavedPoemsOpen, setIsSavedPoemsOpen] = useState<boolean>(false);
   const closeLiveVoice = useCallback(() => setIsLiveVoiceOpen(false), []);
   const [isFarhangOpen, setIsFarhangOpen] = useState<boolean>(false);
   const [isCraftDrawerOpen, setIsCraftDrawerOpen] = useState<boolean>(false);
@@ -994,6 +996,7 @@ export default function App() {
         }
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenFarhangModal={() => setIsFarhangOpen(true)}
+        onOpenSavedPoems={() => setIsSavedPoemsOpen(true)}
         user={user}
         onSignIn={async () => {
           try {
@@ -1423,6 +1426,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {isSavedPoemsOpen && <SavedPoemsModal onClose={() => setIsSavedPoemsOpen(false)} />}
       {isLiveVoiceOpen && (
         <LiveVoiceModal
           onClose={closeLiveVoice}

@@ -465,7 +465,8 @@ async function startServer() {
     const agentName = process.env.LIVEKIT_AGENT_NAME?.trim() || 'sukhan-live';
     const requestedLanguage = String(req.body?.language || 'auto').toLowerCase();
     const language = requestedLanguage.startsWith('hi') ? 'hi'
-      : requestedLanguage.startsWith('en') ? 'en' : 'ur';
+      : requestedLanguage.startsWith('en') ? 'en'
+      : requestedLanguage === 'auto' ? 'auto' : 'ur';
     const requestedVoice = String(req.body?.voice || 'auto');
     const voice = requestedVoice === 'auto' || ALLOWED_EDGE_VOICES.has(requestedVoice)
       ? requestedVoice : 'auto';

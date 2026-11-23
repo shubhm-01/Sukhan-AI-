@@ -115,16 +115,18 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     try {
       const raw = JSON.parse(localStorage.getItem('sukhan_saved_verses_v1') || '[]');
       const saved = Array.isArray(raw) ? raw : [];
-      if (!saved.some((item) => item.id === message.id)) {
-        saved.unshift({
-          id: message.id,
-          chatId: message.chatId,
-          content: message.content.replace(/\\[\\/?VERSE\\]/gi, '').trim(),
-          createdAt: new Date().toISOString(),
-        });
-      }
-      localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(saved.slice(0, 250)));
-      setIsSaved(true);
+      const alreadySaved = saved.some((item) => item.id === message.id);
+      const next = alreadySaved
+        ? saved.filter((item) => item.id !== message.id)
+        : [{
+            id: message.id,
+            chatId: message.chatId,
+            content: message.content.replace(/\\[\\/?VERSE\\]/gi, '').trim(),
+            createdAt: new Date().toISOString(),
+          }, ...saved];
+      localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(next.slice(0, 250)));
+      setIsSaved(!alreadySaved);
+      window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
     } catch {
       setRecitationError('Could not save this poem on this device.');
     }

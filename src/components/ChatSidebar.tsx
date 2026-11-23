@@ -12,6 +12,7 @@ import {
   Moon,
   Settings,
   BookOpen,
+  BookMarked,
   LogIn,
   LogOut,
   Cloud,
@@ -35,6 +36,7 @@ interface ChatSidebarProps {
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   onOpenFarhangModal: () => void;
+  onOpenSavedPoems: () => void;
   user: User | null;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -58,6 +60,7 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onToggleTheme,
   onOpenSettings,
   onOpenFarhangModal,
+  onOpenSavedPoems,
   user,
   onSignIn,
   onSignOut,
@@ -341,6 +344,17 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
         >
           <BookOpen className="w-3.5 h-3.5 text-[var(--accent-gold)]" />
           <span>Farhang &amp; Poetic Lexicon</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            onOpenSavedPoems();
+            onCloseMobile();
+          }}
+          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--accent-gold)] hover:text-[var(--accent-gold)]"
+        >
+          <span className="flex items-center gap-2.5"><BookMarked className="h-3.5 w-3.5 text-[var(--accent-gold)]" />Saved Shayari &amp; Poems</span>
         </button>
 
         <button

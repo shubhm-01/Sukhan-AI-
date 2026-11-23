@@ -90,9 +90,9 @@ function releaseCurrent() {
 }
 function selectVoice(text: string, preferredVoice: string) {
   if (preferredVoice && preferredVoice !== 'auto') return preferredVoice;
-  const language = detectLanguageAndScript(text).detected;
-  if (language === 'hindi') return 'hi-IN-SwaraNeural';
-  if (language === 'urdu' || language === 'roman_urdu') return 'ur-PK-UzmaNeural';
+  const detected = detectLanguageAndScript(text);
+  if (detected.detected === 'hindi') return 'hi-IN-SwaraNeural';
+  if (detected.detected === 'urdu' || (detected.detected === 'roman_urdu' && detected.confidence === 'high')) return 'ur-PK-UzmaNeural';
   return 'en-IN-NeerjaNeural';
 }
 async function getAudio(messageId: string, text: string, voice: string, signal: AbortSignal) {

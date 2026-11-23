@@ -9,7 +9,7 @@ This remains the existing React 19 + Vite + Tailwind CSS 4 application wrapped a
 - A compact mobile chat header, language/form quick selectors, poetic starter prompts and a rounded bottom composer.
 - The left drawer keeps chat history, saved conversations, Farhang, profile and Settings in one place.
 - Settings add Dark, Light and Warm Paper themes, preferred read-aloud voice and the optional HTTPS backend URL.
-- Poetry responses have a shared Listen/Pause/Resume state machine, one active player across messages, IndexedDB audio caching, local save and PNG share cards.
+- Poetry responses have a shared Listen/Pause/Resume state machine, one active player across messages, IndexedDB audio caching, a Saved Shayari collection in the drawer, and PNG share cards.
 - The Live screen uses LiveKit WebRTC, a GSAP orb and mute/end controls.
 - A separate Python LiveKit Agent uses Groq Whisper STT, Groq GPT-OSS LLM and Silero VAD. LiveKit's default turn handling cancels agent speech when the user interrupts.
 - The Node backend issues short-lived LiveKit room tokens only after verifying a signed-in Firebase ID token.

@@ -43,7 +43,7 @@ exact requested Radif. Keep normal conversation concise and friendly. When
 speaking poetry, pause naturally between couplets and pronounce Urdu/Hindi
 words carefully. The user may interrupt at any moment; yield immediately."""
 
-def detect_language(text: str, fallback: str = "ur") -> str:
+def detect_language(text: str, fallback: str = "auto") -> str:
     if re.search(r"[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff]", text):
         return "ur"
     if re.search(r"[\u0900-\u097f]", text):
@@ -92,7 +92,7 @@ def mp3_to_livekit_frames(audio_bytes: bytes) -> list[rtc.AudioFrame]:
 class SukhanAgent(Agent):
     def __init__(self, requested_voice: str = "auto", language: str = "ur") -> None:
         self.requested_voice = requested_voice if requested_voice in ALLOWED_VOICES else "auto"
-        self.language = language if language in ("ur", "hi", "en") else "ur"
+        self.language = language if language in ("ur", "hi", "en", "auto") else "auto"
         super().__init__(instructions=SYSTEM_PROMPT)
 
     async def tts_node(
@@ -147,11 +147,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.warning("Agent job metadata was malformed")
 
     requested_voice = str(metadata.get("voice", "auto"))
-    language = str(metadata.get("language", "ur"))
+    language = str(metadata.get("language", "auto"))
     if language == "roman_urdu":
         language = "ur"
-    if language not in ("ur", "hi", "en"):
-        language = "ur"
+    if language not in ("ur", "hi", "en", "auto"):
+        language = "auto"
 
     session = AgentSession(
         stt=groq.STT(
