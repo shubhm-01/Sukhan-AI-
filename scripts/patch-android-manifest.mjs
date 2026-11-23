@@ -22,11 +22,10 @@ fs.mkdirSync(xmlResDir, { recursive: true });
 const netSecPath = path.join(xmlResDir, 'network_security_config.xml');
 const netSecXml = `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
-        </trust-anchors>
+                </trust-anchors>
     </base-config>
 </network-security-config>
 `;
@@ -35,7 +34,7 @@ console.log('[Sukhan APK Patch] Wrote res/xml/network_security_config.xml');
 
 // 2. Patch AndroidManifest.xml:
 //    - Place INTERNET & ACCESS_NETWORK_STATE permissions directly above <application> tag
-//    - Set android:usesCleartextTraffic="true" and android:networkSecurityConfig="@xml/network_security_config"
+//    - Require HTTPS only with android:usesCleartextTraffic="false" and a system-trust-only network config
 //    - Set android:windowSoftInputMode="adjustResize" on <activity>
 let xml = fs.readFileSync(manifestPath, 'utf8');
 
@@ -55,10 +54,11 @@ const permissionsBlock = `    <uses-permission android:name="android.permission.
 
 xml = xml.replace('<application', permissionsBlock);
 
+xml = xml.replace(/android:usesCleartextTraffic="true"/g, 'android:usesCleartextTraffic="false"');
 if (!xml.includes('android:usesCleartextTraffic')) {
   xml = xml.replace(
     '<application',
-    '<application\n        android:usesCleartextTraffic="true"'
+    '<application\n        android:usesCleartextTraffic="false"'
   );
 }
 
@@ -77,7 +77,7 @@ if (!xml.includes('android:windowSoftInputMode')) {
 }
 
 fs.writeFileSync(manifestPath, xml, 'utf8');
-console.log('[Sukhan APK Patch] Patched AndroidManifest.xml with INTERNET, ACCESS_NETWORK_STATE, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, cleartextTraffic, and networkSecurityConfig.');
+console.log('[Sukhan APK Patch] Patched AndroidManifest.xml with INTERNET, ACCESS_NETWORK_STATE, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, HTTPS-only cleartext policy, and networkSecurityConfig.');
 
 // 3. Patch android/app/build.gradle: disable R8/ProGuard obfuscation (minifyEnabled false, shrinkResources false)
 const appGradlePath = path.join(rootDir, 'android', 'app', 'build.gradle');
