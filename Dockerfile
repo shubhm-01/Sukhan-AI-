@@ -15,7 +15,7 @@ RUN python3 -m venv /opt/sukhan-python
 ENV PATH="/opt/sukhan-python/bin:$PATH"
 
 COPY package.json ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+RUN npm install --no-audit --no-fund --legacy-peer-deps --include=dev
 
 COPY livekit-agent/requirements.txt ./livekit-agent/requirements.txt
 RUN pip install --no-cache-dir -r livekit-agent/requirements.txt
