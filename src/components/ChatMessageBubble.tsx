@@ -124,6 +124,12 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             content: message.content.replace(/\[\/?VERSE\]/gi, '').trim(),
             createdAt: new Date().toISOString(),
           }, ...saved];
+      const deletedRaw = JSON.parse(localStorage.getItem('sukhan_saved_verse_deletions_v1') || '[]');
+      const deleted = Array.isArray(deletedRaw) ? deletedRaw.filter((value): value is string => typeof value === 'string') : [];
+      const pendingDeletes = alreadySaved
+        ? [...new Set([...deleted, message.id])]
+        : deleted.filter((id) => id !== message.id);
+      localStorage.setItem('sukhan_saved_verse_deletions_v1', JSON.stringify(pendingDeletes));
       localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify(next.slice(0, 250)));
       setIsSaved(!alreadySaved);
       window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
