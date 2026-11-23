@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { Waves, Loader2, Mic, MicOff, PhoneOff, X } from 'lucide-react';
 import { gsap } from 'gsap';
-import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { resolveApiUrl } from '../utils/apiClient';
 
 interface LiveVoiceModalProps {
@@ -67,14 +67,15 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({ onClose, languag
 
     const connect = async () => {
       try {
-        const user = auth.currentUser;
-        if (!user) throw new Error('Sign in from the left drawer before starting Live Voice.');
-        const idToken = await user.getIdToken();
+        const { data: { session }, error: sessionError } = await supabase?.auth.getSession() ?? { data: { session: null }, error: null };
+        if (sessionError) throw sessionError;
+        const accessToken = session?.access_token;
+        if (!accessToken) throw new Error('Sign in from the left drawer before starting Live Voice.');
         const response = await fetch(resolveApiUrl('/api/livekit/token'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({ language, voice }),
         });
