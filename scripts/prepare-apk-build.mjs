@@ -22,7 +22,6 @@ pkg.dependencies = {
   'html-to-image': '^1.11.13',
   'livekit-client': '^2.20.1',
   'livekit-server-sdk': '^2.20.1',
-  'firebase-admin': '^13.0.0',
   '@capacitor-community/speech-recognition': '^7.0.1',
   '@capacitor-community/text-to-speech': '^6.0.0',
   '@capacitor/android': '^7.0.0',
@@ -37,7 +36,7 @@ pkg.dependencies = {
   '@vitejs/plugin-react': '^4.3.0',
   dotenv: '^16.4.0',
   express: '^4.21.0',
-  firebase: '^11.0.0',
+  '@supabase/supabase-js': '2.119.2',
   'lucide-react': '^0.460.0',
   motion: '^12.0.0',
   react: '^19.0.0',
@@ -60,20 +59,3 @@ pkg.devDependencies = {
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 console.log('[Sukhan APK Prep] package.json normalized successfully.');
 
-const fbConfigPath = path.join(rootDir, 'firebase-applet-config.json');
-if (!fs.existsSync(fbConfigPath)) {
-  const defaultFbConfig = {
-    projectId: 'storied-hawk-tn50x',
-    appId: '1:117334778546:web:495089c9d869f0a8149fab',
-    apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyDpvVm1a7-UmjL7m0Dj48-C2V1sq6AW5fc',
-    authDomain: 'storied-hawk-tn50x.firebaseapp.com',
-    firestoreDatabaseId: 'ai-studio-sukhanai-4d175da9-2da9-4f4a-8c4a-b0bd756154f2',
-    storageBucket: 'storied-hawk-tn50x.firebasestorage.app',
-    messagingSenderId: '117334778546',
-    measurementId: '',
-  };
-  fs.writeFileSync(fbConfigPath, JSON.stringify(defaultFbConfig, null, 2) + '\n', 'utf8');
-  console.log('[Sukhan APK Prep] Generated firebase-applet-config.json.');
-} else {
-  console.log('[Sukhan APK Prep] firebase-applet-config.json already present.');
-}
