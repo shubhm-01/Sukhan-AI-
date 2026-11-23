@@ -15,7 +15,7 @@ The schema creates `chats`, `messages`, `saved_poems`, and `poem_embeddings`, en
 
 ## 2. Auth settings (email + six-digit code)
 
-In Authentication → Providers, enable Email and password sign-in. In Authentication → Email Templates, update the confirmation / Magic Link template to display the numeric token, for example:
+In Authentication → Providers → Email, enable the Email provider, password sign-in, and email confirmations. Keep email confirmation enabled so the app requires verification before it treats an account as verified. In Authentication → Email Templates, update the confirmation / Magic Link template to display the numeric token, for example:
 
 ```html
 <h2>Verify your Sukhan AI account</h2>
@@ -23,7 +23,7 @@ In Authentication → Providers, enable Email and password sign-in. In Authentic
 <p>This code expires soon. If you did not request it, ignore this email.</p>
 ```
 
-The in-app flow uses `signUp({ email, password })`, then `verifyOtp({ email, token, type: 'signup' })`; no browser popup or OAuth redirect is used.
+The in-app flow uses `signUp({ email, password })`, then `verifyOtp({ email, token, type: 'signup' })`; no browser popup or OAuth redirect is used. When this setting and the numeric-token email template are configured, the app accepts the six-digit code directly in its own modal.
 
 Important: new Supabase Free projects currently cannot customise Auth email templates with the default SMTP service. To deliver a numeric code using the custom template, configure your own SMTP provider under Authentication → SMTP Settings. Without custom SMTP/template support, the confirmation email may contain a link instead of the six-digit code.
 
