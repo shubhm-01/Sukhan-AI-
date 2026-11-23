@@ -83,16 +83,38 @@ export async function updateMessageInCloud(userId: string, chatId: string, messa
 export async function syncSavedPoemsToCloud(userId: string): Promise<void> {
   if (!supabase) return;
   const poems = readLocalSavedPoems();
-  if (!poems.length) return;
-  const rows = poems.map((poem) => ({
-    id: poem.id,
-    user_id: userId,
-    chat_id: poem.chatId || null,
-    content: poem.content.slice(0, 20000),
-    created_at: asIso(poem.createdAt, new Date().toISOString()),
-  }));
-  const { error } = await supabase.from('saved_poems').upsert(rows, { onConflict: 'id' });
+  if (poems.length) {
+    const rows = poems.map((poem) => ({
+      id: poem.id,
+      user_id: userId,
+      chat_id: poem.chatId || null,
+      content: poem.content.slice(0, 20000),
+      created_at: asIso(poem.createdAt, new Date().toISOString()),
+    }));
+    const { error } = await supabase.from('saved_poems').upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+  }
+
+  const { data, error } = await supabase.from('saved_poems')
+    .select('id,chat_id,content,created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
   if (error) throw error;
+  const byId = new Map<string, SavedPoemRecord>();
+  for (const item of [...(data || []), ...poems]) {
+    byId.set(String(item.id), {
+      id: String(item.id),
+      chatId: item.chatId || (item.chat_id ? String(item.chat_id) : undefined),
+      content: String(item.content || ''),
+      createdAt: asIso(item.createdAt || item.created_at, new Date().toISOString()),
+    });
+  }
+  try {
+    localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify([...byId.values()]));
+    window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
+  } catch {
+    // Cloud remains the durable copy if the device has no storage space.
+  }
 }
 
 export async function syncLocalDataToCloud(userId: string, localChats: ChatThread[]): Promise<ChatThread[]> {
