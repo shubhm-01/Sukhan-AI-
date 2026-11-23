@@ -5,7 +5,7 @@
   "backgroundColor": "#0E0B14",
   "server": {
     "androidScheme": "https",
-    "cleartext": true,
+    "cleartext": false,
     "allowNavigation": [
       "*.run.app",
       "*.googleapis.com",
@@ -18,7 +18,7 @@
     ]
   },
   "android": {
-    "allowMixedContent": true,
+    "allowMixedContent": false,
     "backgroundColor": "#0E0B14"
   }
 }
