@@ -1,113 +1,92 @@
-# Sukhan AI — mobile UI, neural read-aloud and Live Voice
+# Sukhan AI — Android, Supabase Auth, read-aloud and Live Voice
 
 ## Current app framework
 
-This remains the existing React 19 + Vite + Tailwind CSS 4 application wrapped as an Android app by Capacitor. It is not a React Native, Expo or Flutter migration. GitHub Actions generates the Android project during the APK job, so the manifest is patched by `scripts/patch-android-manifest.mjs`.
+React 19 + Vite + Tailwind CSS 4 wrapped as an Android app by Capacitor. It is not React Native, Expo or Flutter. GitHub Actions generates the Android project, patches the Android manifest and builds the APK.
 
-## What this branch adds
+## Supabase Auth and offline-first sync
 
-- A compact mobile chat header, language/form quick selectors, poetic starter prompts and a rounded bottom composer.
-- The left drawer keeps chat history, saved conversations, Farhang, profile and Settings in one place.
-- Settings add Dark, Light and Warm Paper themes, preferred read-aloud voice and the optional HTTPS backend URL.
-- Poetry responses have a shared Listen/Pause/Resume state machine, one active player across messages, IndexedDB audio caching, a Saved Shayari collection in the drawer, and PNG share cards.
-- The Live screen uses LiveKit WebRTC, a GSAP orb and mute/end controls.
-- A separate Python LiveKit Agent uses Groq Whisper STT, Groq GPT-OSS LLM and Silero VAD. LiveKit's default turn handling cancels agent speech when the user interrupts.
-- The Node backend issues short-lived LiveKit room tokens only after verifying a signed-in Firebase ID token.
-- Gemini keys are no longer injected into the frontend/APK bundle. The old unauthenticated `/api/chats` ownerId endpoints are retired; guest chat history stays local, and signed-in chat history uses the existing owner-restricted Firestore rules.
+The Firebase Auth / Firestore integration has been replaced in this branch with `@supabase/supabase-js`.
 
-## Package lists
+- Sign in: email + password inside an in-app modal; no `signInWithPopup`.
+- Sign up: email + password, followed by a six-digit email verification code.
+- OTP confirmation: `supabase.auth.verifyOtp({ email, token, type: 'signup' })`.
+- Chats, messages and Saved Shayari: remain in localStorage when signed out; on sign-in, local history is upserted into the user's Supabase account and cloud history/poems are restored to the device.
+- Postgres RLS ties each row to `auth.uid()`. The Android client uses only a public anon/publishable key.
 
-### npm (web + Android APK)
+Create a dedicated Supabase project and run `supabase/schema.sql`; see `SUPABASE_SETUP.md`. Do not use the unrelated family-guardian project.
 
-The main app dependencies are already present: React, Tailwind, Motion, Lucide, Capacitor, Firebase and the existing Gemini text SDK. The added packages are:
+## Required Supabase configuration
 
-```bash
-npm install @radix-ui/react-dialog gsap html-to-image livekit-client livekit-server-sdk firebase-admin
-```
+**Android APK build (GitHub Actions repository variables):**
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY` — public anon key or publishable key
+- `VITE_API_BASE_URL` — HTTPS API origin, no trailing slash
 
-The APK build normalizes `package.json` before installing, so `scripts/prepare-apk-build.mjs` also lists these dependencies. Do not remove them from that script.
-
-### Python (Node read-aloud + LiveKit agent)
-
-```bash
-# Node backend's read-aloud adapter
-python -m pip install edge-tts
-
-# Separate LiveKit worker
-cd livekit-agent
-python -m venv .venv
-# macOS / Linux:
-source .venv/bin/activate
-# Windows PowerShell:
-# .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-The LiveKit worker requirements are `livekit-agents[groq,silero]`, `edge-tts`, `av` and `python-dotenv`.
-
-## Required credentials and where they go
-
-Create a LiveKit Cloud project and a Groq API key. Start with the LiveKit Build/free plan and Groq's free developer tier; both have quotas and are not unlimited commitments.
-
-**Node backend (Cloud Run or your HTTPS API host):**
-- `LIVEKIT_URL` — LiveKit project URL, usually `wss://…livekit.cloud`
+**Node backend secrets:**
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY` — public anon/publishable key used only to validate bearer access tokens with Auth
+- `LIVEKIT_URL`
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
-- `FIREBASE_PROJECT_ID` — currently `storied-hawk-tn50x`
-- Firebase Admin Application Default Credentials, or `FIREBASE_SERVICE_ACCOUNT_JSON` for local development
-- Optional `GEMINI_API_KEY` for the existing text assistant endpoint
-- `VITE_API_BASE_URL` is only a build-time public backend URL for the Android APK, not a secret
+- `GEMINI_API_KEY` — optional, for the existing poetry generation endpoint
 
-**LiveKit Python worker (deployed separately):**
+Never put a Supabase service-role key, Supabase secret key, Groq key or LiveKit API secret into a `VITE_*` variable or the APK.
+
+## Six-digit email OTP delivery
+
+Set the Supabase Auth confirmation email template to include `{{ .Token }}`. The Free-plan default Supabase SMTP currently does not allow custom Auth email templates on newly created projects; configure your own SMTP provider to send the six-digit code template. See the Supabase setup guide for the example template.
+
+## Live Voice architecture
+
+The Node API `server.ts` issues short-lived LiveKit room tokens after verifying the caller's Supabase access token with `auth.getUser(accessToken)`.
+
+The Python worker `livekit-agent/agent.py` uses:
+- LiveKit Agents
+- Groq Whisper STT: `whisper-large-v3-turbo`
+- Groq LLM: `openai/gpt-oss-120b`
+- Silero VAD for turn detection / interruption
+- Edge TTS neural voices for Urdu, Hindi and English
+
+Required worker secrets:
 - `LIVEKIT_URL`
 - `LIVEKIT_API_KEY`
 - `LIVEKIT_API_SECRET`
 - `GROQ_API_KEY`
+
+Optional:
 - `LIVEKIT_AGENT_NAME=sukhan-live`
-- Optional `GROQ_STT_MODEL=whisper-large-v3-turbo`
-- Optional `GROQ_LLM_MODEL=openai/gpt-oss-120b`
-- Optional Urdu/Hindi/English Edge TTS voice override variables
+- `GROQ_STT_MODEL=whisper-large-v3-turbo`
+- `GROQ_LLM_MODEL=openai/gpt-oss-120b`
+- `EDGE_TTS_VOICE_URDU`, `EDGE_TTS_VOICE_HINDI`, `EDGE_TTS_VOICE_ENGLISH`
 
-Never add LiveKit, Groq, Firebase service-account or Gemini secret values to a `VITE_*` variable or to the Android app. The client receives only a short-lived room token after Firebase authentication.
+## Hugging Face Docker deployment
 
-For Cloud Run, prefer the service's Application Default Credentials and grant the service identity the minimum Firebase Authentication verification access required by your project. For local testing, set `FIREBASE_SERVICE_ACCOUNT_JSON` to a service-account JSON string without committing that value.
+The repository root now contains:
+- `README.md` with Hugging Face Space metadata: `sdk: docker`, `app_port: 7860`
+- `Dockerfile` that installs Node, Python, FFmpeg and worker dependencies
+- `start.sh` that supervises the Node API and the LiveKit worker together
 
-## Start the app and agent locally
+For a Space deployment, add these as Hugging Face Space secrets:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `LIVEKIT_URL`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+- `GROQ_API_KEY`
+- `GEMINI_API_KEY` if using the poetry generation API
 
-Terminal 1 — Node backend + web app:
+To upload this branch to `hfexplorer2634/sukhan-ai-backend`, add a repository secret named `HF_TOKEN` in GitHub with a Hugging Face token that can contribute to repositories, then manually run the GitHub Actions workflow `Deploy backend to Hugging Face Space`.
 
-```bash
-npm install
-npm run dev
-```
+**Hosting limitation:** Hugging Face currently requires a PRO personal plan (or Team/Enterprise for organizations) to create/run compute-backed Docker Spaces on CPU Basic. Static Spaces are free, and eligible free personal accounts can use up to two ZeroGPU Gradio Spaces; those cannot run this combined Node + LiveKit Docker service. The Docker deployment files are prepared, but the existing free Gradio Space is not converted or deployed by this branch workflow. Do not assume a live `hf.space` API URL until the Docker Space starts successfully.
 
-Terminal 2 — LiveKit agent:
+## Android networking
 
-```bash
-cd livekit-agent
-python agent.py dev
-```
+The app's backend URL is configurable in Settings and can also be provided as `VITE_API_BASE_URL` during the build. The Android manifest patch includes INTERNET, ACCESS_NETWORK_STATE, RECORD_AUDIO and MODIFY_AUDIO_SETTINGS permissions and blocks cleartext HTTP. Use HTTPS URLs for the API and Supabase.
 
-Sign in with a verified Firebase account, open Settings and set the backend URL only when the backend is hosted separately. Tap the waveform icon to enter Live Voice. The worker must be running and registered under `sukhan-live`.
+## Free/open-source scope
 
-## Android APK configuration
-
-The Android directory is generated by the existing GitHub Actions workflow. The manifest patch now ensures these permissions:
-- `INTERNET`
-- `ACCESS_NETWORK_STATE`
-- `RECORD_AUDIO`
-- `MODIFY_AUDIO_SETTINGS`
-
-The Capacitor allow-navigation list includes the LiveKit Cloud hosts. For an APK built by Actions, set the GitHub repository variable/secret `VITE_API_BASE_URL` to the Node backend's HTTPS URL. Do not set Groq or LiveKit secrets in the APK workflow. The workflow still produces the same `Sukhan-AI.apk` debug artifact.
-
-## Free and open-source scope — important distinction
-
-The app-side packages, LiveKit SDK/Agents framework, Silero VAD, Groq SDK plugins and the `edge-tts` Python client are open source. The actual hosted services are not all open-source software:
-- LiveKit Cloud and Groq are hosted services with free tiers/quotas, not self-hosted free services.
-- `edge-tts` is an open-source client for Microsoft's hosted Edge neural speech service. The speech engine is not an open model and requires an internet connection.
-- Groq free-tier model availability, request limits and pricing can change. The originally requested `llama-3.3-70b-versatile` model was shut down on 16 August 2026; this branch uses `openai/gpt-oss-120b` instead. See the [official Groq deprecation table](https://console.groq.com/docs/deprecations).
-
-Consequently this is a no-secret-in-the-client, free-tier-friendly implementation, not a guarantee of unlimited zero-cost operation or a fully self-hosted open-weight voice stack. If strict self-hosting is required, a local Kokoro voice backend can replace Edge TTS for supported languages; Urdu voice quality/support must be validated separately before removing the Edge fallback.
+The frontend libraries, Supabase client, Postgres schema, pgvector, LiveKit Agents/SDK and Silero VAD are open-source. Groq and LiveKit Cloud are hosted services with quotas; Edge TTS is an open-source client to Microsoft's hosted speech endpoint, not an offline open model. This is a free-tier-friendly setup, not an unlimited, always-on or fully self-hosted guarantee.
 
 ## Build checks
 
@@ -118,4 +97,4 @@ npm run build
 python -m compileall livekit-agent scripts/edge-tts.py
 ```
 
-GitHub Actions is the authoritative Android build check because it generates the Capacitor Android project, patches the manifest and runs Gradle. A successful web build alone does not prove that the generated APK installs or that LiveKit credentials/worker are configured.
+The GitHub Actions Android workflow is the authoritative generated Android / Gradle APK check.
