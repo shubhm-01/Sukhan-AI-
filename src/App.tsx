@@ -636,11 +636,24 @@ export default function App() {
       }
     }
 
+    // Queue the delete before attempting the network so it is retried after a future sign-in.
+    try {
+      const rawDeletes = JSON.parse(localStorage.getItem('sukhan_chat_deletions_v1') || '[]');
+      const pendingDeletes = Array.isArray(rawDeletes) ? rawDeletes.filter((id): id is string => typeof id === 'string') : [];
+      if (!pendingDeletes.includes(chatId)) pendingDeletes.push(chatId);
+      localStorage.setItem('sukhan_chat_deletions_v1', JSON.stringify(pendingDeletes));
+    } catch {
+      // The UI still updates locally when browser storage is unavailable.
+    }
+
     if (authReady && user) {
       try {
         await deleteChatFromCloud(user.id, chatId);
+        const rawDeletes = JSON.parse(localStorage.getItem('sukhan_chat_deletions_v1') || '[]');
+        const pendingDeletes = Array.isArray(rawDeletes) ? rawDeletes.filter((id): id is string => typeof id === 'string' && id !== chatId) : [];
+        localStorage.setItem('sukhan_chat_deletions_v1', JSON.stringify(pendingDeletes));
       } catch (err) {
-        setErrorBanner({ message: `Could not delete the cloud copy. Your local view was updated. ${err instanceof Error ? err.message : ''}` });
+        setErrorBanner({ message: `Cloud deletion queued for the next sync. Your local view was updated. ${err instanceof Error ? err.message : ''}` });
       }
     }
   };
