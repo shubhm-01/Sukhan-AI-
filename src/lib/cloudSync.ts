@@ -20,6 +20,15 @@ function readLocalSavedPoems(): SavedPoemRecord[] {
   }
 }
 
+function readPendingSavedPoemDeletes(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('sukhan_saved_verse_deletions_v1') || '[]');
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function asIso(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || !value) return fallback;
   const date = new Date(value);
@@ -82,6 +91,18 @@ export async function updateMessageInCloud(userId: string, chatId: string, messa
 
 export async function syncSavedPoemsToCloud(userId: string): Promise<void> {
   if (!supabase) return;
+  const pendingDeletes = readPendingSavedPoemDeletes();
+  if (pendingDeletes.length) {
+    const { error: deleteError } = await supabase.from('saved_poems')
+      .delete().eq('user_id', userId).in('id', pendingDeletes);
+    if (deleteError) throw deleteError;
+    try {
+      localStorage.removeItem('sukhan_saved_verse_deletions_v1');
+    } catch {
+      // A repeated idempotent delete is safe on the next sync.
+    }
+  }
+
   const poems = readLocalSavedPoems();
   if (poems.length) {
     const rows = poems.map((poem) => ({
@@ -110,8 +131,11 @@ export async function syncSavedPoemsToCloud(userId: string): Promise<void> {
     });
   }
   try {
-    localStorage.setItem('sukhan_saved_verses_v1', JSON.stringify([...byId.values()]));
-    window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
+    const nextValue = JSON.stringify([...byId.values()]);
+    if (localStorage.getItem('sukhan_saved_verses_v1') !== nextValue) {
+      localStorage.setItem('sukhan_saved_verses_v1', nextValue);
+      window.dispatchEvent(new Event('sukhan-saved-verses-changed'));
+    }
   } catch {
     // Cloud remains the durable copy if the device has no storage space.
   }
