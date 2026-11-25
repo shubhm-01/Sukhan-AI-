@@ -131,12 +131,24 @@ export async function syncSavedPoemsToCloud(userId: string): Promise<void> {
     .order('created_at', { ascending: false });
   if (error) throw error;
   const byId = new Map<string, SavedPoemRecord>();
-  for (const item of [...(data || []), ...poems]) {
+  const fallbackCreatedAt = new Date().toISOString();
+
+  // Normalize cloud rows first; local copies are applied afterward so offline edits win.
+  for (const item of data || []) {
     byId.set(String(item.id), {
       id: String(item.id),
-      chatId: item.chatId || (item.chat_id ? String(item.chat_id) : undefined),
+      chatId: item.chat_id ? String(item.chat_id) : undefined,
       content: String(item.content || ''),
-      createdAt: asIso(item.createdAt || item.created_at, new Date().toISOString()),
+      createdAt: asIso(item.created_at, fallbackCreatedAt),
+    });
+  }
+
+  for (const item of poems) {
+    byId.set(item.id, {
+      id: item.id,
+      chatId: item.chatId,
+      content: item.content,
+      createdAt: asIso(item.createdAt, fallbackCreatedAt),
     });
   }
   try {
