@@ -199,33 +199,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Resolve release tag
-        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: v')) }}
-        id: release_meta
-        env:
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            tag="$INPUT_RELEASE_TAG"
-          else
-            tag="${COMMIT_MESSAGE#release: }"
-          fi
-
-          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid release tag: $tag" >&2
-            exit 1
-          fi
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Publish downloadable GitHub Release
-        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: v')) }}
+        if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.event.head_commit.message == 'release: v1.0.0') }}
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
+          tag_name: ${{ inputs.release_tag || 'v1.0.0' }}
           target_commitish: ${{ github.sha }}
-          name: Sukhan AI ${{ steps.release_meta.outputs.tag }} (Android)
+          name: Sukhan AI ${{ inputs.release_tag || 'v1.0.0' }} (Android)
           body: |
             ## Sukhan AI for Android
 
