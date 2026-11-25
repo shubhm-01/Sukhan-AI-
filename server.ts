@@ -601,8 +601,7 @@ async function startServer() {
       [...rawMessages].reverse().find((m: any) => m.role === 'user')?.content || '';
     const prevAssistantMsg =
       [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
-    const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
-    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+    const userIntent = detectUserIntent(String(lastUserMsg), prevAssistantMsg);
 
     const ai = getGenAIClient();
     const systemInstruction = buildChatSystemInstruction(settings, userIntent);
@@ -710,8 +709,7 @@ async function startServer() {
       [...rawMessages].reverse().find((m: any) => m.role === 'user')?.content || '';
     const prevAssistantMsg =
       [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
-    const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
-    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+    const userIntent = detectUserIntent(String(lastUserMsg), prevAssistantMsg);
 
     const ai = getGenAIClient();
     const systemInstruction = buildChatSystemInstruction(settings, userIntent);
