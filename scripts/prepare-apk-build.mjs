@@ -26,7 +26,7 @@ pkg.dependencies = {
   '@fontsource/noto-naskh-arabic': '^5.1.0',
   '@fontsource/noto-serif-devanagari': '^5.1.0',
   '@fontsource/plus-jakarta-sans': '^5.1.0',
-  '@google/genai': '^1.0.0',
+  '@google/genai': '^2.30.0',
   '@tailwindcss/vite': '^4.0.0',
   '@vitejs/plugin-react': '^4.3.0',
   dotenv: '^16.4.0',
@@ -37,6 +37,7 @@ pkg.dependencies = {
   react: '^19.0.0',
   'react-dom': '^19.0.0',
   vite: '^6.0.0',
+  ws: '^8.18.0',
 };
 
 pkg.devDependencies = {
@@ -44,6 +45,7 @@ pkg.devDependencies = {
   '@types/node': '^22.0.0',
   '@types/react': '^19.0.0',
   '@types/react-dom': '^19.0.0',
+  '@types/ws': '^8.18.0',
   autoprefixer: '^10.4.20',
   esbuild: '^0.24.0',
   tailwindcss: '^4.0.0',

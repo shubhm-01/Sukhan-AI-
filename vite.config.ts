@@ -5,12 +5,6 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const geminiKey =
-    env.VITE_GEMINI_API_KEY ||
-    env.GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    '';
   const apiBaseUrl =
     env.VITE_API_BASE_URL ||
     env.SUKHAN_API_BASE_URL ||
@@ -22,7 +16,6 @@ export default defineConfig(({ mode }) => {
     base: mode === 'production' ? './' : '/',
     plugins: [react(), tailwindcss()],
     define: {
-      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
     },
     build: {

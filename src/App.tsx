@@ -25,10 +25,14 @@ import {
   Square,
   Mic,
   MicOff,
+  AudioLines,
 } from 'lucide-react';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMessageBubble } from './components/ChatMessageBubble';
 import { FarhangView } from './components/FarhangView';
+import { LiveMehfilModal } from './components/LiveMehfilModal';
+import type { LiveMehfilMood } from './data/shayariKnowledgeVault';
+import { ensureShayariCorpusLoaded } from './services/shayariCorpusService';
 import {
   ChatThread,
   ChatMessageItem,
@@ -142,6 +146,11 @@ export default function App() {
     }
   }, [settings]);
 
+  // Hydrate offline-cached classical & open-source Shayari corpus on startup
+  useEffect(() => {
+    void ensureShayariCorpusLoaded();
+  }, []);
+
   // Firebase Auth User
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState<boolean>(false);
@@ -177,6 +186,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isFarhangOpen, setIsFarhangOpen] = useState<boolean>(false);
   const [isCraftDrawerOpen, setIsCraftDrawerOpen] = useState<boolean>(false);
+  const [isLiveMehfilOpen, setIsLiveMehfilOpen] = useState<boolean>(false);
 
   // Composer State
   const [composerText, setComposerText] = useState<string>('');
@@ -930,21 +940,26 @@ export default function App() {
           setErrorBanner({ message: 'Microphone/speech permission was not granted. Allow microphone access in Android app settings, then try Voice again.' });
           return;
         }
+        const baseComposerText = composerText.trimEnd();
         const listener = await SpeechRecognition.addListener('partialResults', (event: { matches?: string[] }) => {
           const transcript = event.matches?.[0]?.trim();
           if (transcript) {
-            setComposerText((current) => (current.trim() ? current.trimEnd() + ' ' : '') + transcript);
+            setComposerText((baseComposerText ? baseComposerText + ' ' : '') + transcript);
           }
         });
         speechRecognitionRef.current = { remove: () => listener.remove() };
         setIsVoiceListening(true);
-        await SpeechRecognition.start({
+        const finalResult = await SpeechRecognition.start({
           language,
           maxResults: 3,
           partialResults: true,
           popup: true,
           prompt: 'Speak your message',
         });
+        const finalTranscript = finalResult?.matches?.[0]?.trim();
+        if (finalTranscript) {
+          setComposerText((baseComposerText ? baseComposerText + ' ' : '') + finalTranscript);
+        }
         setIsVoiceListening(false);
         const activeListener = speechRecognitionRef.current;
         speechRecognitionRef.current = null;
@@ -989,6 +1004,40 @@ export default function App() {
       setErrorBanner({ message: 'Could not start voice input. Please allow microphone access and check your device speech service.' });
     }
   };
+
+  const handleSaveRecitationToChat = useCallback(
+    (coupletText: string, mood: LiveMehfilMood) => {
+      const clean = coupletText.trim();
+      if (!clean) return;
+      const nowIso = new Date().toISOString();
+      const ownerId = user?.uid || 'guest';
+      const newChatId = `mehfil-${Date.now()}`;
+      const savedChat: ChatThread = {
+        id: newChatId,
+        ownerId,
+        title: `Live Mehfil · ${mood.charAt(0).toUpperCase() + mood.slice(1)}`,
+        saved: true,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        messages: [
+          {
+            id: `msg-mehfil-${Date.now()}`,
+            chatId: newChatId,
+            ownerId,
+            role: 'assistant',
+            content: `[VERSE]\n${clean}\n[/VERSE]`,
+            feedback: 'none',
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
+        ],
+      };
+      setChats((prev) => [savedChat, ...prev]);
+      setActiveChatId(newChatId);
+      void persistChatToFirestore(savedChat);
+    },
+    [user?.uid]
+  );
 
   const composerDetection = detectLanguageAndScript(composerText);
 
@@ -1091,6 +1140,16 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => setIsLiveMehfilOpen(true)}
+              aria-label="Open Live Mehfil Voice Studio"
+              className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-surface)] border border-[var(--accent-gold)]/45 text-xs font-medium text-[var(--accent-gold)] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <AudioLines className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Live Mehfil</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsFarhangOpen(true)}
               aria-label="Open Farhang Poetic Lexicon"
               className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
@@ -1115,7 +1174,7 @@ export default function App() {
           <div className="max-w-3xl mx-auto space-y-6">
             {!activeChat || activeChat.messages.length === 0 ? (
               /* Empty State / Literary Welcome Screen */
-              <div className="py-8 sm:py-12 space-y-8 text-center">
+              <div className="py-6 sm:py-10 space-y-7 text-center">
                 <div className="space-y-3 max-w-xl mx-auto">
                   <div className="w-12 h-12 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border-strong)] flex items-center justify-center mx-auto">
                     <Feather className="w-6 h-6 text-[var(--accent-gold)]" />
@@ -1138,6 +1197,17 @@ export default function App() {
                     </span>{' '}
                     whenever you want to compose poetry.
                   </p>
+
+                  <div className="pt-2 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setIsLiveMehfilOpen(true)}
+                      className="min-h-[48px] px-6 py-3 rounded-2xl bg-[var(--accent-gold)] hover:bg-[var(--accent-gold-hover)] text-[var(--accent-fg)] text-sm font-semibold inline-flex items-center gap-2.5 shadow-lg shadow-[#D4AF37]/20 transition-transform active:scale-[0.98] cursor-pointer whitespace-nowrap"
+                    >
+                      <Mic className="w-4 h-4" />
+                      <span>Live Mehfil (Voice)</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Starter Prompt Cards */}
@@ -1675,6 +1745,14 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Full-Screen Live Mehfil Voice Shayari Studio */}
+      <LiveMehfilModal
+        isOpen={isLiveMehfilOpen}
+        onClose={() => setIsLiveMehfilOpen(false)}
+        settings={settings}
+        onSaveRecitationToChat={handleSaveRecitationToChat}
+      />
     </div>
   );
 }

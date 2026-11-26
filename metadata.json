@@ -1,6 +1,6 @@
 {
   "name": "Sukhan AI — Shayari & Ghazal Maker",
   "description": "A literary AI workspace for composing, refining, and preserving Urdu poetry, Roman Urdu shayari, Hindi kavita, ghazals, nazms, and poetic captions.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

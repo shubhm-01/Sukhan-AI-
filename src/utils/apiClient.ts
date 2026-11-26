@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import {
   buildContextualChatReply,
   detectUserIntent,
@@ -98,6 +97,50 @@ export function resolveApiUrl(
   }
 
   return cleanPath;
+}
+
+/**
+ * Resolves a WebSocket endpoint URL (e.g. '/api/live-mehfil') for both Web
+ * (ws:// / wss:// on current origin) and Capacitor Android APK (using VITE_API_BASE_URL).
+ */
+export function resolveWebSocketUrl(
+  endpointPath: string,
+  envBaseUrl?: string,
+  loc?: { protocol?: string; host?: string; hostname?: string; port?: string },
+  hasCapacitorGlobal?: boolean
+): string | null {
+  const cleanPath = endpointPath.startsWith('/')
+    ? endpointPath
+    : `/${endpointPath}`;
+
+  const rawEnvBase =
+    typeof envBaseUrl === 'string'
+      ? envBaseUrl
+      : typeof import.meta !== 'undefined' && import.meta.env
+      ? String(import.meta.env.VITE_API_BASE_URL || '')
+      : '';
+
+  const trimmedBase = rawEnvBase.trim().replace(/\/+$/, '');
+
+  if (isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
+    if (!trimmedBase || !/^https?:\/\//i.test(trimmedBase)) {
+      return null;
+    }
+    const wsBase = trimmedBase.replace(/^http/i, 'ws');
+    return `${wsBase}${cleanPath}`;
+  }
+
+  const runtimeLoc =
+    loc ?? (typeof window !== 'undefined' ? window.location : undefined);
+  const protocol = runtimeLoc?.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host =
+    runtimeLoc?.host ||
+    (runtimeLoc?.hostname
+      ? `${runtimeLoc.hostname}${runtimeLoc.port ? `:${runtimeLoc.port}` : ''}`
+      : '');
+
+  if (!host) return null;
+  return `${protocol}//${host}${cleanPath}`;
 }
 
 export function buildClientChatSystemInstruction(
@@ -323,116 +366,7 @@ export async function executeResilientChatTurn(
     }
   }
 
-  // Tier 3: Direct Gemini API (REST fetch + SDK fallback when VITE_GEMINI_API_KEY is bundled)
-  const clientApiKey =
-    typeof import.meta !== 'undefined' && import.meta.env
-      ? String(import.meta.env.VITE_GEMINI_API_KEY || '').trim()
-      : '';
-
-  if (
-    clientApiKey &&
-    clientApiKey !== 'MY_GEMINI_API_KEY' &&
-    !clientApiKey.startsWith('AQ.')
-  ) {
-    const formattedContents = messages.slice(-16).map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-
-    const modelsToTry = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-3.8-flash',
-      'gemini-3.1-flash-lite',
-    ];
-
-    // 3A. Pure HTTPS REST fetch (immune to SDK minification/obfuscation in APK builds)
-    for (const modelId of modelsToTry) {
-      if (signal.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-      try {
-        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${encodeURIComponent(
-          clientApiKey
-        )}`;
-        const restRes = await fetch(restUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            contents: formattedContents,
-            generationConfig: { temperature: 0.75 },
-          }),
-        });
-
-        if (restRes.ok) {
-          const restJson = await restRes.json();
-          const parts = restJson?.candidates?.[0]?.content?.parts;
-          const rawText = Array.isArray(parts)
-            ? parts.map((p: any) => p?.text || '').join('').trim()
-            : '';
-          if (rawText) {
-            const cleanedText = sanitizeAiOutput(rawText, userIntent);
-            await streamTextIncrementally(
-              cleanedText,
-              signal,
-              onChunk,
-              onComplete
-            );
-            return;
-          }
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          throw err;
-        }
-        // Try next model
-      }
-    }
-
-    // 3B. GoogleGenAI SDK fallback
-    try {
-      const ai = new GoogleGenAI({ apiKey: clientApiKey });
-      for (const modelId of modelsToTry) {
-        if (signal.aborted) {
-          throw new DOMException('Aborted', 'AbortError');
-        }
-        try {
-          const response = await ai.models.generateContent({
-            model: modelId,
-            contents: formattedContents,
-            config: {
-              systemInstruction,
-              temperature: 0.75,
-              ...(useWebResearch ? { tools: [{ googleSearch: {} }] } : {}),
-            },
-          });
-
-          const rawText = response.text?.trim();
-          if (rawText) {
-            const cleanedText = sanitizeAiOutput(rawText, userIntent);
-            await streamTextIncrementally(
-              cleanedText,
-              signal,
-              onChunk,
-              onComplete
-            );
-            return;
-          }
-        } catch {
-          // Try next model
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw err;
-      }
-      // Proceed to Tier 4
-    }
-  }
-
-  // Tier 4A: Live Cloud AI POST Endpoint (Works inside the installed Android APK with zero API key setup!)
+  // Tier 3A: Live Cloud AI POST Endpoint (Works inside standalone Android APK with zero setup)
   try {
     const openAiMessages = [
       { role: 'system', content: systemInstruction },

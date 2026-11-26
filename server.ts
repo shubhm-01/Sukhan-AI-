@@ -1,10 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { WebSocketServer, WebSocket } from 'ws';
+import {
+  GoogleGenAI,
+  Type,
+  Modality,
+  type LiveServerMessage,
+} from '@google/genai';
 import {
   ComposeRequest,
   GeneratedPoem,
@@ -20,6 +27,18 @@ import {
   detectUserIntent,
   INITIAL_SEED_CHATS,
 } from './src/utils/poetryLogic.ts';
+import {
+  LIVE_VOICE_OPTIONS,
+  type LiveVoiceName,
+} from './src/data/shayariKnowledgeVault.ts';
+import {
+  buildPoeticCraftPromptBlock,
+  buildGeminiLiveAdaayegiInstruction,
+} from './src/data/poeticCraftEngine.ts';
+import {
+  ensureShayariCorpusLoaded,
+  retrieveRelevantShayari,
+} from './src/services/shayariCorpusService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -109,7 +128,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-function getGenAIClient(): GoogleGenAI | null {
+function getGenAIClient(
+  apiVersion: 'v1beta' | 'v1alpha' = 'v1beta'
+): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
@@ -117,6 +138,7 @@ function getGenAIClient(): GoogleGenAI | null {
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
+      apiVersion,
       headers: {
         'User-Agent': 'aistudio-build',
       },
@@ -126,7 +148,8 @@ function getGenAIClient(): GoogleGenAI | null {
 
 function buildChatSystemInstruction(
   settings?: Partial<UserSettings>,
-  userIntent?: string
+  userIntent?: string,
+  userQuery = ''
 ): string {
   const scriptPref =
     settings?.defaultScript === 'urdu'
@@ -148,6 +171,18 @@ function buildChatSystemInstruction(
       ? 'IMMEDIATE TURN RULE: The user is having a normal conversation or asking a general question—NOT asking for a poem. Answer naturally and directly like ChatGPT. DO NOT generate unsolicited poetry or [VERSE] blocks unless the user explicitly asked for verses.'
       : 'IMMEDIATE TURN RULE: The user is requesting poetry, literary explanation, or refinement. Provide a rich literary response and wrap verse lines inside [VERSE] and [/VERSE] tags.';
 
+  let craftAndRagBlock = '';
+  if (userIntent !== 'greeting') {
+    const rag = retrieveRelevantShayari(userQuery, {
+      mood: settings?.poeticStyle,
+      limit: 5,
+    });
+    craftAndRagBlock = buildPoeticCraftPromptBlock(
+      rag.couplets,
+      rag.suggestedAlfaaz
+    );
+  }
+
   return [
     'You are Sukhan AI — a warm, erudite, ChatGPT-style conversational AI and master Ustad of Urdu poetry, Roman Urdu shayari, Hindi kavita, ghazals, nazms, and literary culture.',
     '1. Conversational Versatility: Behave like ChatGPT first and foremost. Chat naturally about anything—answer general questions, discuss philosophy, history, everyday topics, explain couplets (tashreeh), or compose original poetry ONLY when requested.',
@@ -159,9 +194,10 @@ function buildChatSystemInstruction(
     settings?.showTranslations !== false
       ? 'When writing Urdu, Roman Urdu, or Hindi poetry, include brief English meanings or vocabulary notes below the [VERSE] block when helpful.'
       : '',
+    craftAndRagBlock,
   ]
     .filter(Boolean)
-    .join('\n');
+    .join('\n\n');
 }
 
 function formatMultiTurnContents(
@@ -193,6 +229,15 @@ function buildSystemInstruction(
     caption: `Compose ${coupletCount} evocative, concise poetic couplets or one-liners suitable for literary captions and status verses.`,
   };
 
+  const rag = retrieveRelevantShayari(`${req.prompt} ${req.mood} ${req.form}`, {
+    mood: req.mood,
+    limit: 5,
+  });
+  const craftBlock = buildPoeticCraftPromptBlock(
+    rag.couplets,
+    rag.suggestedAlfaaz
+  );
+
   return [
     'You are Sukhan AI, a master Ustad of Urdu poetry, Roman Urdu shayari, and Hindi kavita.',
     langGuide,
@@ -201,9 +246,10 @@ function buildSystemInstruction(
     req.radif ? `Mandatory Radif (exact ending refrain phrase): "${req.radif}".` : '',
     req.qafiya ? `Suggested Qafiya rhyme sound/words: "${req.qafiya}".` : '',
     req.takhallus ? `If including a Maqta (final couplet), weave in the poet pen-name (Takhallus): "${req.takhallus}".` : '',
+    craftBlock,
   ]
     .filter(Boolean)
-    .join('\n');
+    .join('\n\n');
 }
 
 async function generatePoemWithCascade(req: ComposeRequest): Promise<GeneratedPoem> {
@@ -225,7 +271,7 @@ async function generatePoemWithCascade(req: ComposeRequest): Promise<GeneratedPo
   }`;
 
   const modelsToTry = [
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen' },
     { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
   ];
 
@@ -237,7 +283,7 @@ async function generatePoemWithCascade(req: ComposeRequest): Promise<GeneratedPo
           contents: finalPrompt,
           config: {
             systemInstruction,
-            temperature: 0.85,
+            ...(modelSpec.id.startsWith('gemini-4') ? {} : { temperature: 0.85 }),
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -423,10 +469,17 @@ async function startServer() {
     const prevAssistantMsg =
       [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
     const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
-    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+    const userIntent = detectUserIntent(
+      String(lastUserMsg),
+      hasPrevPoem ? prevAssistantMsg : undefined
+    );
 
     const ai = getGenAIClient();
-    const systemInstruction = buildChatSystemInstruction(settings, userIntent);
+    const systemInstruction = buildChatSystemInstruction(
+      settings,
+      userIntent,
+      String(lastUserMsg)
+    );
     const formattedContents = formatMultiTurnContents(
       rawMessages.slice(-16).map((m: any) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -438,48 +491,58 @@ async function startServer() {
     let finalGroundingSources: GroundingSource[] = [];
     let providerUsed = 'Sukhan Conversational Engine';
 
-    if (ai) {
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
-      for (const modelId of modelsToTry) {
-        try {
-          const response = await withTimeout(
-            ai.models.generateContent({
-              model: modelId,
-              contents: formattedContents,
-              config: {
-                systemInstruction,
-                temperature: 0.75,
-                ...(useWebResearch ? { tools: [{ googleSearch: {} }] } : {}),
-              },
-            }),
-            7500
-          );
+    const shouldEnableSearch =
+      useWebResearch ||
+      userIntent === 'poetry_request' ||
+      userIntent === 'poetry_refinement';
 
-          const text = response.text?.trim();
-          if (text) {
-            finalReplyText =
-              userIntent === 'greeting'
-                ? text.replace(/\[\/?VERSE\]/gi, '')
-                : text;
-            providerUsed = modelId;
-            const chunks =
-              response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            if (Array.isArray(chunks)) {
-              for (const c of chunks) {
-                if (c?.web?.uri && c?.web?.title) {
-                  if (!finalGroundingSources.some((g) => g.uri === c.web.uri)) {
-                    finalGroundingSources.push({
-                      title: c.web.title,
-                      uri: c.web.uri,
-                    });
+    if (ai) {
+      const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+      outerLoop: for (const modelId of modelsToTry) {
+        const searchModes = shouldEnableSearch ? [true, false] : [false];
+        for (const enableSearch of searchModes) {
+          try {
+            const response = await withTimeout(
+              ai.models.generateContent({
+                model: modelId,
+                contents: formattedContents,
+                config: {
+                  systemInstruction,
+                  ...(modelId.startsWith('gemini-4') ? {} : { temperature: 0.78 }),
+                  ...(enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
+                },
+              }),
+              18000
+            );
+
+            const text = response.text?.trim();
+            if (text) {
+              finalReplyText =
+                userIntent === 'greeting'
+                  ? text.replace(/\[\/?VERSE\]/gi, '')
+                  : text;
+              providerUsed = modelId;
+              const chunks =
+                response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(chunks)) {
+                for (const c of chunks) {
+                  const webUri = c?.web?.uri;
+                  const webTitle = c?.web?.title;
+                  if (webUri && webTitle) {
+                    if (!finalGroundingSources.some((g) => g.uri === webUri)) {
+                      finalGroundingSources.push({
+                        title: webTitle,
+                        uri: webUri,
+                      });
+                    }
                   }
                 }
               }
+              break outerLoop;
             }
-            break;
+          } catch {
+            // Gracefully fall back if search grounding or model fails
           }
-        } catch {
-          // Try next model in cascade
         }
       }
     }
@@ -532,10 +595,17 @@ async function startServer() {
     const prevAssistantMsg =
       [...rawMessages].reverse().find((m: any) => m.role === 'assistant')?.content || '';
     const hasPrevPoem = /\[VERSE\]/i.test(prevAssistantMsg);
-    const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem);
+    const userIntent = detectUserIntent(
+      String(lastUserMsg),
+      hasPrevPoem ? prevAssistantMsg : undefined
+    );
 
     const ai = getGenAIClient();
-    const systemInstruction = buildChatSystemInstruction(settings, userIntent);
+    const systemInstruction = buildChatSystemInstruction(
+      settings,
+      userIntent,
+      String(lastUserMsg)
+    );
     const formattedContents = formatMultiTurnContents(
       rawMessages.slice(-16).map((m: any) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -543,41 +613,49 @@ async function startServer() {
       }))
     );
 
+    const shouldEnableSearch =
+      useWebResearch ||
+      userIntent === 'poetry_request' ||
+      userIntent === 'poetry_refinement';
+
     if (ai) {
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
       for (const modelId of modelsToTry) {
-        try {
-          const response = await withTimeout(
-            ai.models.generateContent({
-              model: modelId,
-              contents: formattedContents,
-              config: {
-                systemInstruction,
-                temperature: 0.8,
-                ...(useWebResearch ? { tools: [{ googleSearch: {} }] } : {}),
-              },
-            }),
-            12000
-          );
-          if (response.text?.trim()) {
-            const groundingSources: GroundingSource[] = [];
-            const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            if (Array.isArray(chunks)) {
-              for (const c of chunks) {
-                if (c?.web?.uri && c?.web?.title) {
-                  groundingSources.push({ title: c.web.title, uri: c.web.uri });
+        const searchModes = shouldEnableSearch ? [true, false] : [false];
+        for (const enableSearch of searchModes) {
+          try {
+            const response = await withTimeout(
+              ai.models.generateContent({
+                model: modelId,
+                contents: formattedContents,
+                config: {
+                  systemInstruction,
+                  ...(modelId.startsWith('gemini-4') ? {} : { temperature: 0.8 }),
+                  ...(enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
+                },
+              }),
+              16000
+            );
+            if (response.text?.trim()) {
+              const groundingSources: GroundingSource[] = [];
+              const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(chunks)) {
+                for (const c of chunks) {
+                  if (c?.web?.uri && c?.web?.title) {
+                    groundingSources.push({ title: c.web.title, uri: c.web.uri });
+                  }
                 }
               }
+              res.json({
+                reply: response.text.trim(),
+                groundingSources: groundingSources.length > 0 ? groundingSources : undefined,
+                provider: modelId,
+              });
+              return;
             }
-            res.json({
-              reply: response.text.trim(),
-              groundingSources: groundingSources.length > 0 ? groundingSources : undefined,
-              provider: modelId,
-            });
-            return;
+          } catch {
+            // Gracefully fall back if search grounding or model fails
           }
-        } catch {
-          // Try next model
         }
       }
     }
@@ -697,12 +775,12 @@ async function startServer() {
         const sourceMimeType = String(audioPart?.mimeType || '').toLowerCase();
         const pcm = Buffer.from(base64Audio, 'base64');
         if (sourceMimeType.includes('audio/l16') || sourceMimeType.includes('pcm')) {
-          const sampleRateMatch = sourceMimeType.match(/rate=(\\d+)/);
+          const sampleRateMatch = sourceMimeType.match(/rate=(\d+)/);
           const sampleRate = sampleRateMatch ? Number(sampleRateMatch[1]) : 24000;
-          const channelsMatch = sourceMimeType.match(/channels=(\\d+)/);
+          const channelsMatch = sourceMimeType.match(/channels=(\d+)/);
           const channels = channelsMatch ? Number(channelsMatch[1]) : 1;
           const bitsPerSample = 16;
-          const blockAlign = channels * bitsPerSample / 8;
+          const blockAlign = (channels * bitsPerSample) / 8;
           const wav = Buffer.alloc(44 + pcm.length);
           wav.write('RIFF', 0);
           wav.writeUInt32LE(36 + pcm.length, 4);
@@ -751,7 +829,333 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  // ============================================================================
+  // 4. LIVE MEHFIL REAL-TIME VOICE WEBSOCKET BRIDGE (Gemini 3.8 Live API)
+  // ============================================================================
+  const server = http.createServer(app);
+  const liveWss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (request, socket, head) => {
+    const reqUrl = request.url || '';
+    if (reqUrl.startsWith('/api/live-mehfil')) {
+      liveWss.handleUpgrade(request, socket, head, (ws) => {
+        liveWss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  liveWss.on('connection', (clientWs: WebSocket) => {
+    let liveSession: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null =
+      null;
+    let isClosed = false;
+
+    const sendJson = (payload: Record<string, unknown>) => {
+      if (!isClosed && clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify(payload));
+      }
+    };
+
+    const closeLiveSession = () => {
+      if (liveSession) {
+        try {
+          liveSession.close();
+        } catch {
+          // Session already closed
+        }
+        liveSession = null;
+      }
+    };
+
+    const connectToGeminiLive = async (voiceName: LiveVoiceName) => {
+      closeLiveSession();
+
+      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'MY_GEMINI_API_KEY') {
+        sendJson({
+          type: 'error',
+          code: 'NO_SERVER_KEY',
+          message:
+            'Gemini API key is not configured yet. Please check Settings > Secrets.',
+        });
+        return;
+      }
+
+      const ragInspirations = retrieveRelevantShayari(
+        `ghazal ishq sukoon sufi falsafa ${voiceName}`,
+        { limit: 5 }
+      );
+      const liveInstruction = buildGeminiLiveAdaayegiInstruction(
+        voiceName,
+        ragInspirations.couplets
+      );
+
+      const handleServerMessage = (message: LiveServerMessage) => {
+        if (isClosed) return;
+
+        const content = message.serverContent;
+        if (content?.interrupted) {
+          sendJson({ type: 'interrupted' });
+        }
+
+        if (content?.inputTranscription?.text) {
+          sendJson({
+            type: 'inputTranscript',
+            text: content.inputTranscription.text,
+          });
+        }
+
+        if (content?.outputTranscription?.text) {
+          sendJson({
+            type: 'outputTranscript',
+            text: content.outputTranscription.text,
+          });
+        }
+
+        const parts = content?.modelTurn?.parts ?? [];
+        for (const part of parts) {
+          if (part.inlineData?.data) {
+            sendJson({
+              type: 'audio',
+              data: part.inlineData.data,
+              mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000',
+            });
+          } else if (part.text) {
+            sendJson({
+              type: 'modelText',
+              text: part.text,
+            });
+          }
+        }
+
+        const groundingChunks = (
+          content as {
+            groundingMetadata?: {
+              groundingChunks?: Array<{
+                web?: { uri?: string; title?: string };
+              }>;
+            };
+          }
+        )?.groundingMetadata?.groundingChunks;
+
+        if (Array.isArray(groundingChunks) && groundingChunks.length > 0) {
+          const sources: GroundingSource[] = [];
+          for (const chunk of groundingChunks) {
+            const uri = chunk?.web?.uri;
+            const title = chunk?.web?.title;
+            if (uri && title && !sources.some((s) => s.uri === uri)) {
+              sources.push({ title, uri });
+            }
+          }
+          if (sources.length > 0) {
+            sendJson({ type: 'grounding', sources });
+          }
+        }
+
+        if (content?.turnComplete) {
+          sendJson({ type: 'turnComplete' });
+        }
+      };
+
+      // Gemini 3.8 Live has native affective/expressive audio built in on v1beta;
+      // prioritize Google Search grounding with pure-audio fallback.
+      const connectionProfiles: Array<{
+        apiVersion: 'v1beta';
+        affective: boolean;
+        googleSearch: boolean;
+      }> = [
+        { apiVersion: 'v1beta', affective: false, googleSearch: true },
+        { apiVersion: 'v1beta', affective: false, googleSearch: false },
+      ];
+
+      let lastErr: unknown = null;
+      for (const profile of connectionProfiles) {
+        if (isClosed) return;
+        const ai = getGenAIClient(profile.apiVersion);
+        if (!ai) break;
+
+        let activeSessionConnected = false;
+        let setupSettled = false;
+        let resolveSetup!: () => void;
+        let rejectSetup!: (reason: Error) => void;
+        const setupPromise = new Promise<void>((resolve, reject) => {
+          resolveSetup = resolve;
+          rejectSetup = reject;
+        });
+        // Prevent Node 22 UnhandledPromiseRejection if rejectSetup fires while awaiting ai.live.connect
+        setupPromise.catch(() => {});
+
+        const setupTimer = setTimeout(() => {
+          if (!setupSettled) {
+            setupSettled = true;
+            rejectSetup(new Error(`Setup timeout on ${profile.apiVersion}`));
+          }
+        }, 5000);
+
+        try {
+          const liveConfig: Record<string, unknown> = {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName,
+                },
+              },
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            systemInstruction: liveInstruction,
+          };
+          if (profile.affective) {
+            liveConfig.enableAffectiveDialog = true;
+          }
+          if (profile.googleSearch) {
+            liveConfig.tools = [{ googleSearch: {} }];
+          }
+
+          liveSession = await ai.live.connect({
+            model: 'gemini-3.8-live',
+            config: liveConfig as Parameters<GoogleGenAI['live']['connect']>[0]['config'],
+            callbacks: {
+              onmessage: (message: LiveServerMessage) => {
+                if (message.setupComplete && !setupSettled) {
+                  setupSettled = true;
+                  clearTimeout(setupTimer);
+                  resolveSetup();
+                }
+                handleServerMessage(message);
+              },
+              onerror: (errEvent) => {
+                const errMsg =
+                  errEvent?.message || 'Gemini Live audio stream interrupted.';
+                if (!setupSettled) {
+                  setupSettled = true;
+                  clearTimeout(setupTimer);
+                  rejectSetup(new Error(errMsg));
+                  return;
+                }
+                if (activeSessionConnected) {
+                  sendJson({
+                    type: 'error',
+                    code: 'LIVE_STREAM_ERROR',
+                    message: errMsg,
+                  });
+                }
+              },
+              onclose: (closeEvent) => {
+                const closeObj = closeEvent as
+                  | { code?: number; reason?: string }
+                  | undefined;
+                if (!setupSettled) {
+                  setupSettled = true;
+                  clearTimeout(setupTimer);
+                  const reason =
+                    closeObj?.reason ||
+                    `Closed before setupComplete (code ${closeObj?.code ?? 'unknown'})`;
+                  rejectSetup(new Error(reason));
+                  return;
+                }
+                if (activeSessionConnected && !isClosed) {
+                  sendJson({
+                    type: 'closed',
+                    code: closeObj?.code,
+                    reason: closeObj?.reason,
+                  });
+                }
+              },
+            },
+          });
+
+          // Wait for Gemini to actually accept the setup frame before declaring ready
+          await setupPromise;
+
+          activeSessionConnected = true;
+          if (!isClosed) {
+            sendJson({
+              type: 'ready',
+              voiceName,
+              affectiveDialog: profile.affective,
+              searchGrounded: profile.googleSearch,
+            });
+          }
+          return;
+        } catch (err) {
+          clearTimeout(setupTimer);
+          lastErr = err;
+          closeLiveSession();
+        }
+      }
+
+      sendJson({
+        type: 'error',
+        code: 'CONNECT_FAILED',
+        message:
+          lastErr instanceof Error
+            ? lastErr.message
+            : 'Unable to connect to Gemini Live voice session.',
+      });
+    };
+
+    clientWs.on('message', async (rawData) => {
+      try {
+        const msg = JSON.parse(rawData.toString()) as {
+          type?: string;
+          voiceName?: string;
+          voice?: string;
+          audio?: string;
+          text?: string;
+        };
+
+        if (msg.type === 'start') {
+          const requestedVoice = msg.voiceName || msg.voice;
+          const validVoice = LIVE_VOICE_OPTIONS.some(
+            (v) => v.id === requestedVoice
+          )
+            ? (requestedVoice as LiveVoiceName)
+            : 'Aoede';
+          await connectToGeminiLive(validVoice);
+          return;
+        }
+
+        if (msg.type === 'audio' && msg.audio && liveSession) {
+          liveSession.sendRealtimeInput({
+            audio: {
+              data: msg.audio,
+              mimeType: 'audio/pcm;rate=16000',
+            },
+          });
+          return;
+        }
+
+        if (msg.type === 'text' && msg.text && liveSession) {
+          liveSession.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: msg.text }] }],
+            turnComplete: true,
+          });
+          return;
+        }
+
+        if (msg.type === 'stop') {
+          closeLiveSession();
+        }
+      } catch {
+        // Ignore malformed frame
+      }
+    });
+
+    clientWs.on('close', () => {
+      isClosed = true;
+      closeLiveSession();
+    });
+
+    clientWs.on('error', () => {
+      isClosed = true;
+      closeLiveSession();
+    });
+  });
+
+  // Warm up open-source Rekhta/Urdu corpus cache asynchronously without blocking boot
+  void ensureShayariCorpusLoaded();
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Sukhan AI server listening on http://localhost:${PORT}`);
   });
 }
