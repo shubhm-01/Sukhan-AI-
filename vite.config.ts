@@ -11,12 +11,17 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_API_BASE_URL ||
     process.env.SUKHAN_API_BASE_URL ||
     '';
+  const apkGeminiApiKey =
+    env.VITE_GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    '';
 
   return {
     base: mode === 'production' ? './' : '/',
     plugins: [react(), tailwindcss()],
     define: {
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
+      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(apkGeminiApiKey),
     },
     build: {
       minify: 'esbuild',

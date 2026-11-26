@@ -18,7 +18,12 @@ import {
   type LiveMehfilMood,
 } from '../data/shayariKnowledgeVault';
 import { LiveAudioEngine } from '../utils/liveAudioEngine';
-import { resolveWebSocketUrl } from '../utils/apiClient';
+import {
+  resolveWebSocketUrl,
+  getBundledApkGeminiKey,
+} from '../utils/apiClient';
+import { retrieveRelevantShayari } from '../services/shayariCorpusService';
+import { buildGeminiLiveAdaayegiInstruction } from '../data/poeticCraftEngine';
 import {
   detectLanguageAndScript,
   type UserSettings,
@@ -72,6 +77,12 @@ export const LiveMehfilModal: React.FC<LiveMehfilModalProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const directSessionRef = useRef<{
+    sendRealtimeInput: (params: {
+      audio: { data: string; mimeType: string };
+    }) => void;
+    close: () => void;
+  } | null>(null);
   const audioEngineRef = useRef<LiveAudioEngine | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -183,6 +194,15 @@ export const LiveMehfilModal: React.FC<LiveMehfilModalProps> = ({
       wsRef.current = null;
     }
 
+    if (directSessionRef.current) {
+      try {
+        directSessionRef.current.close();
+      } catch {
+        // Ignore close errors
+      }
+      directSessionRef.current = null;
+    }
+
     if (audioEngineRef.current) {
       await audioEngineRef.current.destroy();
       audioEngineRef.current = null;
@@ -202,12 +222,14 @@ export const LiveMehfilModal: React.FC<LiveMehfilModalProps> = ({
       setStatusMessage(`Connecting to ${targetVoice}...`);
 
       const wsUrl = resolveWebSocketUrl('/api/live-mehfil');
-      if (!wsUrl) {
+      const apkGeminiKey = !wsUrl ? getBundledApkGeminiKey() : '';
+
+      if (!wsUrl && !apkGeminiKey) {
         setPhase('error');
         setErrorText(
-          'Live audio server URL is not configured for this build.'
+          'Standalone APK Live Voice requires GEMINI_API_KEY (or VITE_API_BASE_URL) in GitHub Repository Secrets → Actions before building the APK.'
         );
-        setStatusMessage('Connection unavailable.');
+        setStatusMessage('APK Live Voice not configured.');
         return;
       }
 
@@ -217,6 +239,17 @@ export const LiveMehfilModal: React.FC<LiveMehfilModalProps> = ({
             wsRef.current.send(
               JSON.stringify({ type: 'audio', audio: base64Pcm16k })
             );
+          } else if (directSessionRef.current) {
+            try {
+              directSessionRef.current.sendRealtimeInput({
+                audio: {
+                  data: base64Pcm16k,
+                  mimeType: 'audio/pcm;rate=16000',
+                },
+              });
+            } catch {
+              // Ignore closed direct session send
+            }
           }
         },
         onPlaybackStateChange: (playing) => {
@@ -262,8 +295,216 @@ export const LiveMehfilModal: React.FC<LiveMehfilModalProps> = ({
         );
       }
 
+      // Path B: Direct Standalone Android APK Gemini Live connection (when built with VITE_GEMINI_API_KEY)
+      if (!wsUrl && apkGeminiKey) {
+        try {
+          const { GoogleGenAI, Modality } = await import('@google/genai');
+          const ai = new GoogleGenAI({
+            apiKey: apkGeminiKey,
+            httpOptions: { apiVersion: 'v1beta' },
+          });
+          const ragInspirations = retrieveRelevantShayari(
+            `ghazal ishq sukoon sufi falsafa ${targetVoice}`,
+            { limit: 5 }
+          );
+          const liveInstruction = buildGeminiLiveAdaayegiInstruction(
+            targetVoice,
+            ragInspirations.couplets
+          );
+
+          const modelProfiles: Array<{ model: string; googleSearch: boolean }> = [
+            { model: 'gemini-3.8-live', googleSearch: true },
+            { model: 'gemini-3.8-live', googleSearch: false },
+            { model: 'gemini-2.5-flash-native-audio-preview-12-2025', googleSearch: true },
+            { model: 'gemini-2.5-flash-native-audio-preview-12-2025', googleSearch: false },
+            { model: 'gemini-2.5-flash-native-audio-preview-09-2025', googleSearch: false },
+          ];
+
+          let connectedDirect = false;
+          let lastDirectErr: unknown = null;
+
+          for (const profile of modelProfiles) {
+            let activeDirect = false;
+            let setupSettled = false;
+            let resolveSetup!: () => void;
+            let rejectSetup!: (reason: Error) => void;
+            const setupPromise = new Promise<void>((resolve, reject) => {
+              resolveSetup = resolve;
+              rejectSetup = reject;
+            });
+            setupPromise.catch(() => {});
+
+            const setupTimer = window.setTimeout(() => {
+              if (!setupSettled) {
+                setupSettled = true;
+                rejectSetup(new Error(`Timeout connecting to ${profile.model}`));
+              }
+            }, 5500);
+
+            try {
+              const liveConfig: Record<string, unknown> = {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: targetVoice },
+                  },
+                },
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+                systemInstruction: liveInstruction,
+              };
+              if (profile.googleSearch) {
+                liveConfig.tools = [{ googleSearch: {} }];
+              }
+
+              const session = await ai.live.connect({
+                model: profile.model,
+                config: liveConfig as Parameters<typeof ai.live.connect>[0]['config'],
+                callbacks: {
+                  onmessage: (message) => {
+                    if (message.setupComplete && !setupSettled) {
+                      setupSettled = true;
+                      window.clearTimeout(setupTimer);
+                      resolveSetup();
+                    }
+                    const content = message.serverContent;
+                    if (content?.interrupted) {
+                      audioEngineRef.current?.clearPlayback();
+                      activeAssistantEntryIdRef.current = null;
+                      setStatusMessage('Listening...');
+                    }
+                    if (content?.inputTranscription?.text) {
+                      activeAssistantEntryIdRef.current = null;
+                      appendOrUpdateTranscript('user', content.inputTranscription.text);
+                    }
+                    if (content?.outputTranscription?.text) {
+                      activeUserEntryIdRef.current = null;
+                      appendOrUpdateTranscript('assistant', content.outputTranscription.text);
+                    }
+                    const parts = content?.modelTurn?.parts ?? [];
+                    for (const part of parts) {
+                      if (part.inlineData?.data) {
+                        audioEngineRef.current?.enqueuePcm24kBase64(part.inlineData.data);
+                      }
+                    }
+                    const groundingChunks = (
+                      content as {
+                        groundingMetadata?: {
+                          groundingChunks?: Array<{
+                            web?: { uri?: string; title?: string };
+                          }>;
+                        };
+                      }
+                    )?.groundingMetadata?.groundingChunks;
+                    if (Array.isArray(groundingChunks) && groundingChunks.length > 0) {
+                      const sources: GroundingSource[] = [];
+                      for (const chunk of groundingChunks) {
+                        if (chunk?.web?.uri && chunk?.web?.title) {
+                          if (!sources.some((s) => s.uri === chunk.web?.uri)) {
+                            sources.push({
+                              title: chunk.web.title,
+                              uri: chunk.web.uri,
+                            });
+                          }
+                        }
+                      }
+                      if (sources.length > 0) {
+                        appendOrUpdateTranscript('assistant', '', sources);
+                      }
+                    }
+                    if (content?.turnComplete) {
+                      activeAssistantEntryIdRef.current = null;
+                      activeUserEntryIdRef.current = null;
+                      if (!audioEngineRef.current?.getIsPlaying()) {
+                        setStatusMessage(
+                          isMutedRef.current ? 'Microphone muted' : 'Listening...'
+                        );
+                      }
+                    }
+                  },
+                  onerror: (errEvent) => {
+                    const errMsg =
+                      errEvent?.message || 'Gemini Live audio stream interrupted.';
+                    if (!setupSettled) {
+                      setupSettled = true;
+                      window.clearTimeout(setupTimer);
+                      rejectSetup(new Error(errMsg));
+                      return;
+                    }
+                    if (activeDirect) {
+                      setPhase('error');
+                      setErrorText(errMsg);
+                      setStatusMessage('Live voice session paused.');
+                    }
+                  },
+                  onclose: (closeEvent) => {
+                    if (!setupSettled) {
+                      setupSettled = true;
+                      window.clearTimeout(setupTimer);
+                      rejectSetup(
+                        new Error(
+                          (closeEvent as { reason?: string } | undefined)?.reason ||
+                            'Closed before setupComplete'
+                        )
+                      );
+                      return;
+                    }
+                    if (activeDirect && phaseRef.current === 'live') {
+                      setPhase('idle');
+                      setStatusMessage('Live session ended.');
+                    }
+                  },
+                },
+              });
+
+              await setupPromise;
+              activeDirect = true;
+              directSessionRef.current = session;
+              connectedDirect = true;
+              setPhase('live');
+              setStatusMessage(
+                micReady
+                  ? isMutedRef.current
+                    ? 'Microphone muted'
+                    : 'Listening...'
+                  : 'Connected — enable microphone to speak.'
+              );
+              break;
+            } catch (profileErr) {
+              window.clearTimeout(setupTimer);
+              lastDirectErr = profileErr;
+            }
+          }
+
+          if (!connectedDirect) {
+            await engine.destroy();
+            audioEngineRef.current = null;
+            setPhase('error');
+            setErrorText(
+              lastDirectErr instanceof Error
+                ? lastDirectErr.message
+                : 'Unable to connect directly to Gemini Live from APK.'
+            );
+            setStatusMessage('Connection failed.');
+          }
+          return;
+        } catch (err) {
+          await engine.destroy();
+          audioEngineRef.current = null;
+          setPhase('error');
+          setErrorText(
+            err instanceof Error
+              ? err.message
+              : 'Unable to initialize Gemini Live SDK in APK.'
+          );
+          setStatusMessage('Connection failed.');
+          return;
+        }
+      }
+
+      // Path A: Web App / Remote Server WebSocket bridge (/api/live-mehfil)
       try {
-        const ws = new WebSocket(wsUrl);
+        const ws = new WebSocket(wsUrl!);
         wsRef.current = ws;
 
         ws.onopen = () => {

@@ -26,7 +26,7 @@ pkg.dependencies = {
   '@fontsource/noto-naskh-arabic': '^5.1.0',
   '@fontsource/noto-serif-devanagari': '^5.1.0',
   '@fontsource/plus-jakarta-sans': '^5.1.0',
-  '@google/genai': '^2.30.0',
+  '@google/genai': '^3.6.1',
   '@tailwindcss/vite': '^4.0.0',
   '@vitejs/plugin-react': '^4.3.0',
   dotenv: '^16.4.0',

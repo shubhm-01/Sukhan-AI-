@@ -23,6 +23,10 @@ import {
   decodePcm16Base64ToFloat32,
   computeRmsLevel,
 } from './liveAudioEngine.ts';
+import {
+  resolveWebSocketUrl,
+  getBundledApkGeminiKey,
+} from './apiClient.ts';
 
 test('All 8 official Google Gemini App HD voices are configured with Aoede default', () => {
   const expectedIds = [
@@ -145,4 +149,30 @@ test('decodePcm16Base64ToFloat32 and downsampleFloat32 preserve audio accuracy',
   const out16k = downsampleFloat32(input48k, 48000, 16000);
   assert.equal(out16k.length, 1600);
   assert.ok(Math.abs(computeRmsLevel(out16k) - 0.5) < 0.01);
+});
+
+test('Web strictly uses /api/live-mehfil while standalone Android APK supports VITE_API_BASE_URL or VITE_GEMINI_API_KEY', () => {
+  const webLoc = { protocol: 'http:', host: 'localhost:3000', hostname: 'localhost', port: '3000' };
+  const apkLoc = { protocol: 'https:', host: 'localhost', hostname: 'localhost', port: '' };
+
+  assert.equal(
+    resolveWebSocketUrl('/api/live-mehfil', '', webLoc, false),
+    'ws://localhost:3000/api/live-mehfil'
+  );
+  // Web must never expose or use bundled client key
+  assert.equal(getBundledApkGeminiKey('test-apk-key-123', webLoc, false), '');
+
+  // APK with VITE_API_BASE_URL uses remote backend WebSocket
+  assert.equal(
+    resolveWebSocketUrl('/api/live-mehfil', 'https://sukhan.example.com/', apkLoc, true),
+    'wss://sukhan.example.com/api/live-mehfil'
+  );
+
+  // Standalone APK without VITE_API_BASE_URL falls back cleanly to bundled VITE_GEMINI_API_KEY
+  assert.equal(resolveWebSocketUrl('/api/live-mehfil', '', apkLoc, true), null);
+  assert.equal(
+    getBundledApkGeminiKey('test-apk-key-123', apkLoc, true),
+    'test-apk-key-123'
+  );
+  assert.equal(getBundledApkGeminiKey('MY_GEMINI_API_KEY', apkLoc, true), '');
 });

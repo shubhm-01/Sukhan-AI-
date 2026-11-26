@@ -3,6 +3,8 @@ import {
   detectUserIntent,
 } from './poetryLogic.ts';
 import type { UserSettings, GroundingSource } from './poetryLogic.ts';
+import { retrieveRelevantShayari } from '../services/shayariCorpusService.ts';
+import { buildPoeticCraftPromptBlock } from '../data/poeticCraftEngine.ts';
 
 /**
  * Detects whether the app is executing inside a packaged Capacitor Android APK
@@ -143,9 +145,36 @@ export function resolveWebSocketUrl(
   return `${protocol}//${host}${cleanPath}`;
 }
 
+/**
+ * Returns the build-time VITE_GEMINI_API_KEY ONLY when running inside a packaged
+ * standalone Capacitor Android APK (where no local Express server exists).
+ * On Web, always returns '' so the web app strictly uses server-side /api/* routes.
+ */
+export function getBundledApkGeminiKey(
+  envKey?: string,
+  loc?: { protocol?: string; hostname?: string; port?: string },
+  hasCapacitorGlobal?: boolean
+): string {
+  if (!isNativeApkEnvironment(loc, hasCapacitorGlobal)) {
+    return '';
+  }
+  const raw =
+    typeof envKey === 'string'
+      ? envKey
+      : typeof import.meta !== 'undefined' && import.meta.env
+      ? String(import.meta.env.VITE_GEMINI_API_KEY || '')
+      : '';
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === 'MY_GEMINI_API_KEY') {
+    return '';
+  }
+  return trimmed;
+}
+
 export function buildClientChatSystemInstruction(
   settings?: Partial<UserSettings>,
-  userIntent?: string
+  userIntent?: string,
+  latestUserPrompt = ''
 ): string {
   const scriptPref =
     settings?.defaultScript === 'urdu'
@@ -167,6 +196,15 @@ export function buildClientChatSystemInstruction(
       ? 'IMMEDIATE TURN RULE: The user is having a normal conversation or asking a general question—NOT asking for a poem. Answer naturally and directly like ChatGPT. DO NOT generate unsolicited poetry or [VERSE] blocks unless the user explicitly asked for verses.'
       : 'IMMEDIATE TURN RULE: The user is requesting poetry, literary explanation, or refinement. Provide a rich literary response and wrap verse lines inside [VERSE] and [/VERSE] tags.';
 
+  let craftGuidance = '';
+  if (userIntent !== 'greeting' && latestUserPrompt.trim()) {
+    const retrieval = retrieveRelevantShayari(latestUserPrompt, { limit: 4 });
+    craftGuidance = buildPoeticCraftPromptBlock(
+      retrieval.couplets,
+      retrieval.suggestedAlfaaz
+    );
+  }
+
   return [
     'You are Sukhan AI — an intelligent, warm, ChatGPT-style conversational AI assistant with deep mastery of Urdu poetry, Roman Urdu shayari, Hindi kavita, ghazals, nazms, and literary culture.',
     'CRITICAL RULE — DO NOT AUTO-GENERATE POETRY UNLESS ASKED:',
@@ -178,6 +216,7 @@ export function buildClientChatSystemInstruction(
     intentDirective,
     scriptPref,
     stylePref,
+    craftGuidance,
     settings?.showTranslations !== false
       ? 'When you do write Urdu, Roman Urdu, or Hindi poetry, include brief English meanings or vocabulary notes below the [VERSE] block when helpful.'
       : '',
@@ -255,7 +294,8 @@ export async function executeResilientChatTurn(
   const userIntent = detectUserIntent(String(lastUserMsg), hasPrevPoem ? prevAssistantMsg : undefined);
   const systemInstruction = buildClientChatSystemInstruction(
     settings,
-    userIntent
+    userIntent,
+    String(lastUserMsg)
   );
 
   const backendReachable = hasBackendApiAvailable();
@@ -362,7 +402,81 @@ export async function executeResilientChatTurn(
       if (err instanceof Error && err.name === 'AbortError') {
         throw err;
       }
-      // Proceed to Tier 3
+      // Proceed to Tier 2.5
+    }
+  }
+
+  // Tier 2.5: Standalone Android APK Direct Gemini SDK (when built with VITE_GEMINI_API_KEY in GitHub Secrets)
+  const apkGeminiKey = getBundledApkGeminiKey();
+  if (apkGeminiKey) {
+    try {
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: apkGeminiKey });
+      const formattedContents = messages.slice(-14).map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }));
+      const shouldSearch =
+        useWebResearch ||
+        userIntent === 'poetry_request' ||
+        userIntent === 'poetry_refinement';
+      const apkModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite'];
+
+      for (const modelId of apkModels) {
+        const searchModes = shouldSearch ? [true, false] : [false];
+        for (const enableSearch of searchModes) {
+          if (signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
+          try {
+            const response = await ai.models.generateContent({
+              model: modelId,
+              contents: formattedContents,
+              config: {
+                systemInstruction,
+                temperature: 0.8,
+                ...(enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
+              },
+            });
+            const replyText = response.text?.trim() || '';
+            if (replyText) {
+              const cleaned = sanitizeAiOutput(replyText, userIntent);
+              const groundingSources: GroundingSource[] = [];
+              const chunks =
+                response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(chunks)) {
+                for (const c of chunks) {
+                  if (c?.web?.uri && c?.web?.title) {
+                    if (!groundingSources.some((g) => g.uri === c.web?.uri)) {
+                      groundingSources.push({
+                        title: c.web.title,
+                        uri: c.web.uri,
+                      });
+                    }
+                  }
+                }
+              }
+              await streamTextIncrementally(
+                cleaned,
+                signal,
+                onChunk,
+                onComplete,
+                groundingSources.length > 0 ? groundingSources : undefined
+              );
+              return;
+            }
+          } catch (innerErr) {
+            if (innerErr instanceof Error && innerErr.name === 'AbortError') {
+              throw innerErr;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw err;
+      }
+      // Fall through to Tier 3A
     }
   }
 

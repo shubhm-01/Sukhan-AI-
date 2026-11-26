@@ -63,7 +63,7 @@ jobs:
                 "@fontsource/noto-naskh-arabic": "^5.1.0",
                 "@fontsource/noto-serif-devanagari": "^5.1.0",
                 "@fontsource/plus-jakarta-sans": "^5.1.0",
-                "@google/genai": "^2.30.0",
+                "@google/genai": "^3.6.1",
                 "@tailwindcss/vite": "^4.0.0",
                 "@vitejs/plugin-react": "^4.3.0",
                 "dotenv": "^16.4.0",
@@ -114,6 +114,13 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY || vars.GEMINI_API_KEY || vars.VITE_GEMINI_API_KEY || '' }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || vars.VITE_API_BASE_URL || secrets.SUKHAN_API_BASE_URL || vars.SUKHAN_API_BASE_URL || '' }}
         run: |
+          if [ -n "$VITE_API_BASE_URL" ]; then
+            echo "[Sukhan APK] Live Voice mode: Remote Backend Server (VITE_API_BASE_URL configured)"
+          elif [ -n "$VITE_GEMINI_API_KEY" ]; then
+            echo "[Sukhan APK] Live Voice mode: Standalone Direct Gemini Live (GEMINI_API_KEY configured)"
+          else
+            echo "::warning::Neither GEMINI_API_KEY nor VITE_API_BASE_URL secret is set in GitHub Actions. Add GEMINI_API_KEY in GitHub Repo Settings > Secrets and variables > Actions to enable Live Voice in the standalone APK."
+          fi
           npm run build
 
       - name: Initialize & sync Capacitor Android project
